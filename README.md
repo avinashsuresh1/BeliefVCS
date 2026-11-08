@@ -163,7 +163,7 @@ BeliefVCS uses [**`uv`**](https://github.com/astral-sh/uv) for fast, determinist
 uv sync --all-extras
 ```
 
-### 2. Run Test Suite (23 Deterministic Tests)
+### 2. Run Test Suite (27 Deterministic Tests)
 ```bash
 uv run pytest
 ```
