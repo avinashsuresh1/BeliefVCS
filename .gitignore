@@ -2,7 +2,7 @@
 **/target/
 **/*.rs.bk
 desktop/src-tauri/target/
-Cargo.lock
+
 
 # Python Caches & Environments
 __pycache__/

@@ -58,16 +58,28 @@ Deploy / Release                 Deploy to Main (Update Status Quo Consensus)
 
 The desktop app is 100% native and cross-platform:
 
-### On Windows
-```powershell
-.\desktop\run.ps1
-```
-*(Or via Cargo: `cargo tauri dev --manifest-path desktop/src-tauri/Cargo.toml`)*
-
-### On macOS / Linux
+### Option A: From Repository Root (Cargo Workspace)
+The root repository is configured with a Cargo workspace:
 ```bash
-./desktop/run.sh
+# Run tests directly from root
+cargo test
+
+# Launch the desktop app directly from root
+cargo run
 ```
+*(If you have `cargo-tauri` installed, you can also run `cargo tauri dev`).*
+
+### Option B: Quick Launcher Scripts (Automatic Cargo & PATH Detection)
+The launcher scripts automatically resolve `cargo` in your environment (including `$HOME/.cargo/bin`) and fallback cleanly between `cargo tauri dev` and `cargo run`:
+
+- **Windows:**
+  ```powershell
+  .\desktop\run.ps1
+  ```
+- **macOS / Linux:**
+  ```bash
+  ./desktop/run.sh
+  ```
 
 ### Packaging Standalone Native Installers
 ```bash
