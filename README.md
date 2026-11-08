@@ -46,22 +46,24 @@ Deploy / Release                 Deploy to Main (Update Status Quo Consensus)
 
 ## Quickstart
 
-### 1. Python Library & CLI
+### 1. Python Library & CLI (Managed with `uv`)
 
-Install requirements:
+BeliefVCS uses [**`uv`**](https://github.com/astral-sh/uv) for high-performance dependency management and deterministic execution.
+
+Sync dependencies & virtual environment:
 ```bash
-pip install -r requirements.txt
+uv sync --all-extras
 ```
 
 Run tests:
 ```bash
-python -m pytest tests/
+uv run pytest
 ```
 
 Run the Cognitive CI/CD & Proof Theory Demos:
 ```bash
-python demo_cognitive_cicd.py
-python demo_proof_theory.py
+uv run python demo_cognitive_cicd.py
+uv run python demo_proof_theory.py
 ```
 
 ### 2. Agent Tool-Calling Usage
