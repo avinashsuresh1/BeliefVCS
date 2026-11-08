@@ -1,0 +1,30 @@
+# Rust Build Artifacts
+**/target/
+**/*.rs.bk
+desktop/src-tauri/target/
+Cargo.lock
+
+# Python Caches & Environments
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+venv/
+.env
+
+# Demo Vaults & Temporary Databases
+demo_knowledge_vault/
+demo_proof_vault/
+local_agent_knowledge.json
+agent_knowledge.json
+desktop/app-icon.png
+**/.vcs/
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
