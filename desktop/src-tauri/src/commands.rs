@@ -94,6 +94,7 @@ pub async fn send_agent_prompt(
 
     let system_prompt = format!(
         "You are an AI Agent operating within the BeliefVCS framework.\n\
+        Epistemic Principle: There are no facts, only beliefs given evidence. Knowledge is WIP always.\n\n\
         Current Knowledge Store Branch: {}\n\
         Known Territories in status quo:\n{}\n\n\
         When solving tasks, follow the Scientific Method:\n\

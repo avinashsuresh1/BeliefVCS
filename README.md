@@ -1,9 +1,11 @@
 # BeliefVCS: Version Control System for AI Agent Beliefs
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Python Tests](https://img.shields.io/badge/Python_Tests-23%20passed-emerald)](tests/)
-[![Rust Tests](https://img.shields.io/badge/Rust_Tests-5%20passed-emerald)](desktop/src-tauri/)
+[![Python Tests](https://img.shields.io/badge/Python_Tests-27%20passed-emerald)](tests/)
+[![Rust Tests](https://img.shields.io/badge/Rust_Tests-7%20passed-emerald)](desktop/src-tauri/)
 
+> *"There are no facts, only beliefs given evidence. Knowledge is WIP always."*
+>
 > **The domain knowledge is the codebase. Beliefs are propositions. Compiling is proof theory. Merging is updating the status quo.**
 
 BeliefVCS is a foundational, local-first framework that treats **agent cognition, domain knowledge, and hypothesis exploration as software engineering**:

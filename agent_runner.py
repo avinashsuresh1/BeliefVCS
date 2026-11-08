@@ -45,7 +45,11 @@ PRESETS = {
 }
 
 def query_model(base_url: str, api_key: str, model: str, messages: list) -> str:
-    endpoint = base_url.rstrip("/")
+    trimmed = base_url.strip()
+    if not (trimmed.startswith("http://") or trimmed.startswith("https://")):
+        raise ValueError(f"Invalid URL scheme in '{base_url}'. Only http:// and https:// endpoints are permitted.")
+
+    endpoint = trimmed.rstrip("/")
     if not endpoint.endswith("/chat/completions"):
         if endpoint.endswith("/v1"):
             endpoint += "/chat/completions"
@@ -112,6 +116,8 @@ def main():
     world_context = "\n".join(context_lines) if context_lines else "No territories mapped yet."
 
     system_prompt = f"""You are a scientific AI agent using the BeliefVCS framework.
+Epistemic Principle: There are no facts, only beliefs given evidence. Knowledge is WIP always.
+
 Active Knowledge Branch: {status['current_branch']}
 
 Current Status Quo Knowledge & Axioms on main:
@@ -120,7 +126,7 @@ Current Status Quo Knowledge & Axioms on main:
 When solving problems, follow the Scientific Method:
 1. Check the status quo first (never retry established Dead Ends).
 2. If encountering an obstacle, formulate a testable hypothesis.
-3. Verify logical consistency and empirical truth before asserting facts."""
+3. Verify logical consistency and empirical truth before asserting beliefs."""
 
     messages = [
         {"role": "system", "content": system_prompt},
