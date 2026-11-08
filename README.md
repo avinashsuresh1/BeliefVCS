@@ -67,11 +67,8 @@ cargo test
 # Launch the desktop app directly from root
 cargo run
 ```
-*(If you have `cargo-tauri` installed, you can also run `cargo tauri dev`).*
 
-### Option B: Quick Launcher Scripts (Automatic Cargo & PATH Detection)
-The launcher scripts automatically resolve `cargo` in your environment (including `$HOME/.cargo/bin`) and fallback cleanly between `cargo tauri dev` and `cargo run`:
-
+### Option B: Quick Launcher Scripts
 - **Windows:**
   ```powershell
   .\desktop\run.ps1
