@@ -3,7 +3,7 @@ import os
 import tempfile
 import shutil
 from library4agents.models import Expertise, Observation
-from library4agents.storage import JsonStorage, MarkdownStorage
+from library4agents.storage import JsonStorage, MarkdownStorage, VCSMarkdownStorage
 
 @pytest.fixture
 def temp_json_storage():
@@ -57,3 +57,34 @@ def test_storage_multiple_items(temp_md_storage):
     
     all_exp = temp_md_storage.get_all()
     assert len(all_exp) == 2
+
+def test_vcs_storage_path_traversal_rejection():
+    temp_dir = tempfile.mkdtemp()
+    try:
+        storage = VCSMarkdownStorage(temp_dir)
+        
+        # Path traversal attempts must raise ValueError
+        with pytest.raises(ValueError, match="Invalid or unsafe branch name"):
+            storage.create_branch("../escaped")
+
+        with pytest.raises(ValueError, match="Invalid or unsafe branch name"):
+            storage.create_branch("foo/../../bar")
+
+        with pytest.raises(ValueError, match="Invalid or unsafe branch name"):
+            storage.create_branch("branch with spaces")
+
+        with pytest.raises(ValueError, match="Invalid or unsafe branch name"):
+            storage.create_branch("bad;rm -rf")
+
+        with pytest.raises(ValueError, match="Invalid or unsafe branch name"):
+            storage.create_branch("")
+
+        # Valid branch names must be accepted
+        storage.create_branch("hypothesis/safe-branch")
+        assert "hypothesis/safe-branch" in storage.list_branches()
+        
+        storage.create_branch("feature_123.v2")
+        assert "feature_123.v2" in storage.list_branches()
+    finally:
+        shutil.rmtree(temp_dir)
+

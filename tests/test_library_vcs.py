@@ -158,3 +158,18 @@ def test_vcs_tools_workflow(monkeypatch):
     finally:
         tools._default_library = None
         shutil.rmtree(temp_dir)
+
+def test_compilation_command_injection_hardening(temp_vcs_library):
+    temp_vcs_library.branch("hypothesis/cmd-safety")
+    temp_vcs_library.checkout("hypothesis/cmd-safety")
+
+    # Empty command fails safely with an execution error
+    res_empty = temp_vcs_library.compile("   ")
+    assert res_empty.passed is False
+    assert "Test command cannot be empty" in res_empty.evidence.output_log
+
+    # Passing test command executes properly without shell=True
+    res = temp_vcs_library.compile(f'"{sys.executable}" -c "print(\'Safe execution\'); exit(0)"')
+    assert res.passed is True
+    assert "Safe execution" in res.evidence.output_log
+

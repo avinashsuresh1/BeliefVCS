@@ -135,14 +135,26 @@ impl VcsWatcher {
         }
     }
 
+    /// Sanitize branch name preventing path traversal
+    pub fn sanitize_branch_name(name: &str) -> Option<String> {
+        let trimmed = name.trim();
+        if trimmed.is_empty() || trimmed.contains("..") || trimmed.contains(':') {
+            return None;
+        }
+        Some(trimmed.replace('/', "__").replace('\\', "__"))
+    }
+
     /// Parse markdown files from working tree or specific branch
     pub fn get_territories(vault_path: &Path, branch: Option<&str>) -> Vec<TerritoryCard> {
         let target_dir: PathBuf = match branch {
             Some(b) if b != "main" => {
-                let sanitized = b.replace('/', "__").replace('\\', "__");
-                let b_dir = vault_path.join(".vcs").join("branches").join(sanitized);
-                if b_dir.exists() {
-                    b_dir
+                if let Some(sanitized) = Self::sanitize_branch_name(b) {
+                    let b_dir = vault_path.join(".vcs").join("branches").join(sanitized);
+                    if b_dir.exists() {
+                        b_dir
+                    } else {
+                        vault_path.to_path_buf()
+                    }
                 } else {
                     vault_path.to_path_buf()
                 }
@@ -531,5 +543,21 @@ Destination node.
         assert_eq!(edges.len(), 1);
         assert_eq!(edges[0].source, "A");
         assert_eq!(edges[0].target, "B");
+    }
+
+    #[test]
+    fn test_sanitize_branch_name() {
+        assert_eq!(
+            VcsWatcher::sanitize_branch_name("hypothesis/my-feature"),
+            Some("hypothesis__my-feature".to_string())
+        );
+        assert_eq!(
+            VcsWatcher::sanitize_branch_name("hypothesis\\win-path"),
+            Some("hypothesis__win-path".to_string())
+        );
+        assert_eq!(VcsWatcher::sanitize_branch_name("../traversal"), None);
+        assert_eq!(VcsWatcher::sanitize_branch_name("foo/../../bar"), None);
+        assert_eq!(VcsWatcher::sanitize_branch_name("c:secret"), None);
+        assert_eq!(VcsWatcher::sanitize_branch_name("   "), None);
     }
 }

@@ -117,10 +117,18 @@ class VCSMarkdownStorage(MarkdownStorage):
             self._sync_working_tree_to_branch("main")
 
     def _sanitize_branch_name(self, name: str) -> str:
-        return name.replace("/", "__").replace("\\", "__")
+        trimmed = name.strip()
+        if not trimmed or ".." in trimmed or not re.match(r"^[a-zA-Z0-9_\-\./]+$", trimmed):
+            raise ValueError(f"Invalid or unsafe branch name: '{name}'. Path traversal and special characters are forbidden.")
+        return trimmed.replace("/", "__").replace("\\", "__")
 
     def _branch_dir(self, name: str) -> str:
-        return os.path.join(self.branches_dir, self._sanitize_branch_name(name))
+        sanitized = self._sanitize_branch_name(name)
+        target = os.path.realpath(os.path.join(self.branches_dir, sanitized))
+        branches_real = os.path.realpath(self.branches_dir)
+        if not (target == branches_real or target.startswith(branches_real + os.sep)):
+            raise ValueError(f"Path traversal detected for branch '{name}'")
+        return target
 
     @property
     def current_branch(self) -> str:

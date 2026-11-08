@@ -1,3 +1,14 @@
+// Safe HTML Escaping Utility to prevent Stored XSS
+function escapeHtml(str) {
+  if (str === null || str === undefined) return "";
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
 // App State
 const state = {
   vaultPath: "knowledge_vault",
@@ -275,6 +286,7 @@ function renderBranchesList(branches) {
 
   branches.forEach(b => {
     const isActive = b === state.currentBranch;
+    const safeBranch = escapeHtml(b);
     const div = document.createElement("div");
     div.className = `p-2.5 rounded-md border text-xs flex items-center justify-between font-mono ${
       isActive 
@@ -284,7 +296,7 @@ function renderBranchesList(branches) {
     div.innerHTML = `
       <div class="flex items-center space-x-2">
         <span class="w-2 h-2 rounded-full ${isActive ? 'bg-emerald-400' : 'bg-slate-600'}"></span>
-        <span>${b}</span>
+        <span>${safeBranch}</span>
       </div>
       <span class="text-[10px] text-slate-500">${b.startsWith("hypothesis/") ? "Hypothesis" : "Status Quo"}</span>
     `;
@@ -305,19 +317,24 @@ function renderCommitsTimeline(commits) {
   commits.forEach(c => {
     const d = new Date(c.timestamp * 1000);
     const timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const safeId = escapeHtml(c.id ? c.id.substring(0, 8) : "");
+    const safeBranch = escapeHtml(c.branch);
+    const safeMsg = escapeHtml(c.message);
+    const safeAuthor = escapeHtml(c.author_agent_id || 'Autonomous');
+    const safeExit = escapeHtml(c.evidence_exit_code ?? 0);
 
     const card = document.createElement("div");
     card.className = "p-3 bg-slate-900/80 rounded-md border border-slate-800 text-xs space-y-1.5";
     card.innerHTML = `
       <div class="flex items-center justify-between">
-        <span class="font-mono text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300">${c.id.substring(0, 8)}</span>
-        <span class="text-[11px] text-slate-500 font-mono">${c.branch} • ${timeStr}</span>
+        <span class="font-mono text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300">${safeId}</span>
+        <span class="text-[11px] text-slate-500 font-mono">${safeBranch} • ${timeStr}</span>
       </div>
-      <p class="text-slate-200 font-medium">${c.message}</p>
+      <p class="text-slate-200 font-medium">${safeMsg}</p>
       <div class="flex items-center justify-between text-[11px] pt-1">
-        <span class="text-slate-400">Agent: <span class="text-indigo-400">${c.author_agent_id || 'Autonomous'}</span></span>
+        <span class="text-slate-400">Agent: <span class="text-indigo-400">${safeAuthor}</span></span>
         ${c.has_evidence 
-          ? `<span class="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 font-mono text-[10px] border border-emerald-500/20">Evidence Exit: ${c.evidence_exit_code ?? 0}</span>` 
+          ? `<span class="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 font-mono text-[10px] border border-emerald-500/20">Evidence Exit: ${safeExit}</span>` 
           : `<span class="text-slate-500 text-[10px]">No probe attached</span>`}
       </div>
     `;
@@ -337,6 +354,13 @@ function renderCompilations(compilations) {
 
   compilations.forEach(c => {
     const isSuccess = c.passed;
+    const safeBranch = escapeHtml(c.branch);
+    const safeMsg = escapeHtml(c.message);
+    const safeExit = escapeHtml(c.exit_code);
+    const safeCmd = escapeHtml(c.test_command || "");
+    const violations = c.violations || [];
+    const violationsHtml = violations.map(v => `<div>• ${escapeHtml(v)}</div>`).join("");
+
     const card = document.createElement("div");
     card.className = `panel border-l-4 ${isSuccess ? 'border-l-emerald-500' : 'border-l-rose-500'} space-y-2`;
     
@@ -348,12 +372,12 @@ function renderCompilations(compilations) {
           }">
             ${isSuccess ? 'BUILD SUCCESS' : 'BUILD FAILED'}
           </span>
-          <span class="font-mono text-xs text-slate-300 font-semibold">${c.branch}</span>
+          <span class="font-mono text-xs text-slate-300 font-semibold">${safeBranch}</span>
         </div>
-        <span class="text-xs font-mono text-slate-400">Exit Code: ${c.exit_code}</span>
+        <span class="text-xs font-mono text-slate-400">Exit Code: ${safeExit}</span>
       </div>
 
-      <div class="text-xs text-slate-200">${c.message}</div>
+      <div class="text-xs text-slate-200">${safeMsg}</div>
 
       ${c.proof_sound !== null && c.proof_sound !== undefined ? `
         <div class="p-2.5 rounded bg-slate-950/80 border border-slate-800 text-[11px] space-y-1">
@@ -363,17 +387,17 @@ function renderCompilations(compilations) {
               ${c.proof_sound ? 'SOUND' : 'UNSOUND (Contradiction)'}
             </span>
           </div>
-          ${c.violations && c.violations.length > 0 ? `
+          ${violations.length > 0 ? `
             <div class="text-rose-400/90 pl-2 border-l border-rose-500/30 space-y-0.5">
-              ${c.violations.map(v => `<div>• ${v}</div>`).join("")}
+              ${violationsHtml}
             </div>
           ` : `<div class="text-slate-500">Logically consistent with existing main axioms and dead ends.</div>`}
         </div>
       ` : ''}
 
-      ${c.test_command ? `
+      ${safeCmd ? `
         <div class="text-[11px] font-mono bg-slate-950 p-2 rounded text-slate-400 border border-slate-900">
-          $ ${c.test_command}
+          $ ${safeCmd}
         </div>
       ` : ''}
     `;
@@ -395,49 +419,54 @@ function renderTerritoriesGrid(territories) {
     const card = document.createElement("div");
     card.className = "panel space-y-3";
 
-    let treasuresHtml = t.treasures.map(tr => 
-      `<li class="text-emerald-400/90 text-xs"><b>${tr.description}</b> ${tr.rationale ? `<span class="text-slate-400 text-[11px]">(${tr.rationale})</span>` : ''}</li>`
+    const safeTerritory = escapeHtml(t.territory);
+    const safeGuide = escapeHtml(t.guide);
+    const tags = t.tags || [];
+    const tagsHtml = tags.map(tag => `<span class="px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 text-[10px] font-mono">${escapeHtml(tag)}</span>`).join("");
+
+    let treasuresHtml = (t.treasures || []).map(tr => 
+      `<li class="text-emerald-400/90 text-xs"><b>${escapeHtml(tr.description)}</b> ${tr.rationale ? `<span class="text-slate-400 text-[11px]">(${escapeHtml(tr.rationale)})</span>` : ''}</li>`
     ).join("");
 
-    let deadEndsHtml = t.dead_ends.map(de => 
-      `<li class="text-rose-400/90 text-xs"><b>${de.description}</b> ${de.rationale ? `<span class="text-slate-400 text-[11px]">(${de.rationale})</span>` : ''}</li>`
+    let deadEndsHtml = (t.dead_ends || []).map(de => 
+      `<li class="text-rose-400/90 text-xs"><b>${escapeHtml(de.description)}</b> ${de.rationale ? `<span class="text-slate-400 text-[11px]">(${escapeHtml(de.rationale)})</span>` : ''}</li>`
     ).join("");
 
-    let axiomsHtml = t.propositions.map(p => 
+    let axiomsHtml = (t.propositions || []).map(p => 
       `<div class="p-2 rounded bg-indigo-950/40 border border-indigo-500/30 text-xs">
-        <div class="text-[10px] text-indigo-300 font-bold uppercase font-mono">Axiom (${p.status})</div>
-        <div class="text-slate-200">${p.claim}</div>
+        <div class="text-[10px] text-indigo-300 font-bold uppercase font-mono">Axiom (${escapeHtml(p.status)})</div>
+        <div class="text-slate-200">${escapeHtml(p.claim)}</div>
        </div>`
     ).join("");
 
     card.innerHTML = `
       <div class="flex items-center justify-between border-b border-slate-800 pb-2">
-        <h3 class="text-sm font-semibold text-white">${t.territory}</h3>
+        <h3 class="text-sm font-semibold text-white">${safeTerritory}</h3>
         <div class="flex space-x-1">
-          ${t.tags.map(tag => `<span class="px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 text-[10px] font-mono">${tag}</span>`).join("")}
+          ${tagsHtml}
         </div>
       </div>
 
       <div class="text-xs text-slate-300 bg-slate-900/50 p-2.5 rounded border border-slate-800/80">
         <span class="text-slate-400 font-semibold block text-[10px] uppercase">Guide</span>
-        ${t.guide}
+        ${safeGuide}
       </div>
 
-      ${t.treasures.length > 0 ? `
+      ${t.treasures && t.treasures.length > 0 ? `
         <div>
           <span class="text-[10px] font-semibold text-emerald-400 uppercase tracking-wide">Treasures (Proven Successes)</span>
           <ul class="list-disc pl-4 space-y-1 mt-1">${treasuresHtml}</ul>
         </div>
       ` : ''}
 
-      ${t.dead_ends.length > 0 ? `
+      ${t.dead_ends && t.dead_ends.length > 0 ? `
         <div>
           <span class="text-[10px] font-semibold text-rose-400 uppercase tracking-wide">Dead Ends (Documented Failures)</span>
           <ul class="list-disc pl-4 space-y-1 mt-1">${deadEndsHtml}</ul>
         </div>
       ` : ''}
 
-      ${t.propositions.length > 0 ? `
+      ${t.propositions && t.propositions.length > 0 ? `
         <div class="space-y-1">
           <span class="text-[10px] font-semibold text-indigo-400 uppercase tracking-wide">Proven Axioms</span>
           ${axiomsHtml}
@@ -567,7 +596,7 @@ async function sendAgentPrompt() {
   // User Message
   const userDiv = document.createElement("div");
   userDiv.className = "user-msg";
-  userDiv.innerHTML = `<span class="role">User</span><p>${prompt}</p>`;
+  userDiv.innerHTML = `<span class="role">User</span><p>${escapeHtml(prompt)}</p>`;
   chatContainer.appendChild(userDiv);
 
   input.value = "";
@@ -576,7 +605,8 @@ async function sendAgentPrompt() {
   // Placeholder Agent Message
   const agentDiv = document.createElement("div");
   agentDiv.className = "agent-msg";
-  agentDiv.innerHTML = `<span class="role">${state.modelConfig.provider} Agent</span><p class="text-slate-400 animate-pulse">Consulting status quo on '${state.currentBranch}'...</p>`;
+  const safeProvider = escapeHtml(state.modelConfig.provider);
+  agentDiv.innerHTML = `<span class="role">${safeProvider} Agent</span><p class="text-slate-400 animate-pulse">Consulting status quo on '${escapeHtml(state.currentBranch)}'...</p>`;
   chatContainer.appendChild(agentDiv);
   chatContainer.scrollTop = chatContainer.scrollHeight;
 
@@ -587,12 +617,12 @@ async function sendAgentPrompt() {
       vaultPath: state.vaultPath
     });
 
-    agentDiv.innerHTML = `<span class="role">${state.modelConfig.provider} Agent</span><p class="whitespace-pre-wrap">${response}</p>`;
+    agentDiv.innerHTML = `<span class="role">${safeProvider} Agent</span><p class="whitespace-pre-wrap">${escapeHtml(response)}</p>`;
     chatContainer.scrollTop = chatContainer.scrollHeight;
 
     // Refresh vault data in case agent modified anything
     syncVaultData();
   } catch (err) {
-    agentDiv.innerHTML = `<span class="role text-rose-400">Error</span><p class="text-rose-400">${err}</p>`;
+    agentDiv.innerHTML = `<span class="role text-rose-400">Error</span><p class="text-rose-400">${escapeHtml(err)}</p>`;
   }
 }

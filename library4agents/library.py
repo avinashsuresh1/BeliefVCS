@@ -1,5 +1,7 @@
 import re
+import shlex
 import subprocess
+import sys
 from typing import List, Optional, Dict, Any
 from .models import Expertise, Evidence, CompilationResult, BeliefCommit, Proposition, ProofVerification
 from .storage import StorageBackend, VCSMarkdownStorage, UnverifiedHypothesisError, BranchNotFoundError
@@ -103,9 +105,25 @@ class Library:
 
         # Stage 2: Empirical Test Execution
         try:
+            is_posix = sys.platform != "win32"
+            raw_args = shlex.split(test_command, posix=is_posix)
+            if not raw_args:
+                raise ValueError("Test command cannot be empty.")
+            
+            if is_posix:
+                cmd_args = raw_args
+            else:
+                cmd_args = [
+                    arg[1:-1] if len(arg) >= 2 and (
+                        (arg.startswith('"') and arg.endswith('"')) or
+                        (arg.startswith("'") and arg.endswith("'"))
+                    ) else arg
+                    for arg in raw_args
+                ]
+
             res_exec = subprocess.run(
-                test_command,
-                shell=True,
+                cmd_args,
+                shell=False,
                 capture_output=True,
                 text=True
             )

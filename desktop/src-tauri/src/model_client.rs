@@ -69,6 +69,19 @@ impl ModelClient {
         }
     }
 
+    /// Validate that URL uses http or https scheme to prevent SSRF and protocol misuse
+    pub fn validate_url_scheme(url: &str) -> Result<(), String> {
+        let trimmed = url.trim();
+        if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+            Ok(())
+        } else {
+            Err(format!(
+                "Invalid URL scheme in '{}'. Only http:// and https:// endpoints are permitted.",
+                url
+            ))
+        }
+    }
+
     /// Format models endpoint for health checking
     pub fn get_models_url(base_url: &str) -> String {
         let trimmed = base_url.trim_end_matches('/');
@@ -83,6 +96,14 @@ impl ModelClient {
 
     /// Check connectivity and latency to any local or cloud AI endpoint
     pub async fn check_health(config: &ModelConfig) -> HealthCheckResult {
+        if let Err(e) = Self::validate_url_scheme(&config.base_url) {
+            return HealthCheckResult {
+                connected: false,
+                latency_ms: 0,
+                message: e,
+            };
+        }
+
         let client = match reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(6))
             .build()
@@ -140,6 +161,8 @@ impl ModelClient {
         config: &ModelConfig,
         messages: &[ChatMessage],
     ) -> Result<String, String> {
+        Self::validate_url_scheme(&config.base_url)?;
+
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(60))
             .build()
@@ -232,5 +255,15 @@ mod tests {
         let deserialized: ModelConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.provider, "ollama");
         assert_eq!(deserialized.model_name, "llama3");
+    }
+
+    #[test]
+    fn test_validate_url_scheme() {
+        assert!(ModelClient::validate_url_scheme("http://localhost:11434/v1").is_ok());
+        assert!(ModelClient::validate_url_scheme("https://api.openai.com/v1").is_ok());
+        assert!(ModelClient::validate_url_scheme("ftp://malicious.internal").is_err());
+        assert!(ModelClient::validate_url_scheme("file:///etc/passwd").is_err());
+        assert!(ModelClient::validate_url_scheme("javascript:alert(1)").is_err());
+        assert!(ModelClient::validate_url_scheme("").is_err());
     }
 }
