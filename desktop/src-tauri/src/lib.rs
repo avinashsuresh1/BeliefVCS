@@ -14,7 +14,9 @@ pub fn run() {
             commands::get_compilations,
             commands::get_knowledge_graph,
             commands::test_model_connection,
-            commands::send_agent_prompt
+            commands::send_agent_prompt,
+            commands::save_territory,
+            commands::distill_unstructured_text
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

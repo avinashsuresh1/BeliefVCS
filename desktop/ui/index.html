@@ -153,9 +153,14 @@
 
       <!-- TAB 4: TERRITORIES & AXIOMS -->
       <section id="tab-territories" class="tab-content space-y-6">
-        <div>
-          <h2 class="text-lg font-semibold text-white">Status Quo Knowledge Store</h2>
-          <p class="text-xs text-slate-400">Canonical guides, verified treasures, and documented dead ends on active branch.</p>
+        <div class="flex items-center justify-between">
+          <div>
+            <h2 class="text-lg font-semibold text-white">Status Quo Knowledge Store</h2>
+            <p class="text-xs text-slate-400">Canonical guides, verified treasures, and documented dead ends on active branch.</p>
+          </div>
+          <button id="open-ingest-modal-btn" class="btn-primary flex items-center space-x-1.5 text-xs">
+            <span>+ Ingest Knowledge / Map Territory</span>
+          </button>
         </div>
         <div id="territories-grid" class="grid grid-cols-2 gap-4"></div>
       </section>
@@ -211,9 +216,14 @@
 
       <!-- TAB 6: AGENT COCKPIT -->
       <section id="tab-cockpit" class="tab-content space-y-4 flex flex-col h-[640px]">
-        <div>
-          <h2 class="text-lg font-semibold text-white">Agent Execution Cockpit</h2>
-          <p class="text-xs text-slate-400">Prompt an agent directly against the active world model and watch it reason.</p>
+        <div class="flex items-center justify-between">
+          <div>
+            <h2 class="text-lg font-semibold text-white">Agent Execution Cockpit</h2>
+            <p class="text-xs text-slate-400">Prompt an agent directly against the active world model and watch it reason.</p>
+          </div>
+          <button id="clear-chat-btn" class="px-2.5 py-1 text-xs rounded border border-slate-700 bg-slate-800 text-slate-300 hover:text-white">
+            Clear Chat
+          </button>
         </div>
 
         <div id="chat-messages" class="flex-1 panel overflow-y-auto space-y-3 p-4">
@@ -228,6 +238,91 @@
           <button id="send-agent-btn" class="btn-primary">Send to Agent</button>
         </div>
       </section>
+
+    </main>
+  </div>
+
+  <!-- INGEST / MAP TERRITORY MODAL -->
+  <div id="ingest-modal" class="fixed inset-0 bg-black/70 backdrop-blur-sm hidden items-center justify-center z-50 p-4">
+    <div class="bg-slate-900 border border-slate-800 rounded-xl w-full max-w-2xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
+      <!-- Modal Header -->
+      <div class="p-4 border-b border-slate-800 flex items-center justify-between">
+        <div>
+          <h3 class="text-sm font-semibold text-white">Ingest Knowledge / Map Territory</h3>
+          <p class="text-[11px] text-slate-400">Convert unstructured text, post-mortems, or notes into version-controlled BeliefVCS knowledge.</p>
+        </div>
+        <button id="close-ingest-modal-btn" class="text-slate-400 hover:text-white text-lg">&times;</button>
+      </div>
+
+      <!-- Modal Body -->
+      <div class="p-4 overflow-y-auto space-y-4 flex-1 text-xs">
+        <!-- Distill Section -->
+        <div class="p-3 bg-slate-950/60 rounded-lg border border-slate-800/80 space-y-2">
+          <label class="block font-medium text-slate-300">Unstructured Raw Notes / Error Logs / Documentation</label>
+          <textarea id="ingest-raw-text" rows="4" class="input-field font-mono text-xs w-full" placeholder="Paste unstructured notes, error logs, incident post-mortems, or chat responses here..."></textarea>
+          <div class="flex items-center justify-between">
+            <span class="text-[10px] text-slate-500">The active model will distill this into a formal BeliefVCS territory card.</span>
+            <button id="distill-btn" class="px-3 py-1.5 rounded bg-indigo-600 hover:bg-indigo-500 text-white font-medium text-xs flex items-center space-x-1">
+              <span>✨ Distill with AI</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Structured Fields -->
+        <div class="space-y-3">
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block font-medium text-slate-300 mb-1">Territory Name / Domain Title</label>
+              <input id="ingest-territory" type="text" class="input-field" placeholder="e.g. Turnstile Stealth Bypass">
+            </div>
+            <div>
+              <label class="block font-medium text-slate-300 mb-1">Tags (comma separated)</label>
+              <input id="ingest-tags" type="text" class="input-field font-mono text-xs" placeholder="e.g. web, scraping, python">
+            </div>
+          </div>
+
+          <div>
+            <label class="block font-medium text-slate-300 mb-1">Canonical Guide / Recommended Steps</label>
+            <textarea id="ingest-guide" rows="3" class="input-field text-xs w-full" placeholder="Step-by-step guidance for future agents..."></textarea>
+          </div>
+
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block font-medium text-emerald-400 mb-1">Treasures (One per line: Description - Rationale)</label>
+              <textarea id="ingest-treasures" rows="3" class="input-field text-xs w-full" placeholder="Use Playwright stealth - Masks webdriver flag&#10;Rotate residential IPs - Avoids subnet bans"></textarea>
+            </div>
+            <div>
+              <label class="block font-medium text-rose-400 mb-1">Dead Ends (One per line: Description - Rationale)</label>
+              <textarea id="ingest-dead-ends" rows="3" class="input-field text-xs w-full" placeholder="Tried parsing HTML with Regex - HTML is not regular&#10;Requests with default UA - Returns 403 Forbidden"></textarea>
+            </div>
+          </div>
+
+          <div>
+            <label class="block font-medium text-amber-400 mb-1">Known Hazards (One per line: Description - Rationale)</label>
+            <textarea id="ingest-hazards" rows="2" class="input-field text-xs w-full" placeholder="Cloudflare blocks headless if GPU disabled - Requires sandbox flag"></textarea>
+          </div>
+
+          <div>
+            <label class="block font-medium text-slate-300 mb-1">Commit Message</label>
+            <input id="ingest-commit-msg" type="text" class="input-field text-xs" placeholder="Map territory: ...">
+          </div>
+        </div>
+      </div>
+
+      <!-- Modal Footer -->
+      <div class="p-3 bg-slate-950 border-t border-slate-800 flex items-center justify-between">
+        <span id="ingest-status-msg" class="text-xs text-slate-400"></span>
+        <div class="flex space-x-2">
+          <button id="cancel-ingest-btn" class="px-3 py-1.5 rounded border border-slate-700 bg-slate-800 text-slate-300 hover:text-white text-xs">
+            Cancel
+          </button>
+          <button id="commit-ingest-btn" class="btn-primary text-xs">
+            💾 Commit to Knowledge Vault
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
 
     </main>
   </div>

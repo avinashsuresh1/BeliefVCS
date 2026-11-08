@@ -198,3 +198,14 @@ def get_knowledge_vcs_status() -> dict:
         "branches": library.list_branches(),
         "total_territories": len(library.find())
     }
+
+def ingest_knowledge(raw_text: str, commit_message: Optional[str] = None) -> str:
+    """
+    Ingest unstructured data (markdown, notes, logs), distill it into a territory,
+    and commit it directly to the active knowledge branch.
+    """
+    from .ingest import ingest_unstructured_to_vault
+    library = _get_library()
+    territory_id = ingest_unstructured_to_vault(raw_text, library=library, commit_message=commit_message)
+    return f"Successfully ingested unstructured knowledge into branch '{library.current_branch}'. Territory ID: {territory_id}"
+

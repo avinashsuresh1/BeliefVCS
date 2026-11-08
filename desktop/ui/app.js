@@ -17,6 +17,8 @@ const state = {
   territories: [],
   commits: [],
   compilations: [],
+  chatHistory: [],
+  isSending: false,
   modelConfig: {
     provider: "ollama",
     base_url: "http://localhost:11434/v1",
@@ -89,6 +91,24 @@ function initEventListeners() {
   document.getElementById("agent-input").addEventListener("keydown", (e) => {
     if (e.key === "Enter") sendAgentPrompt();
   });
+
+  const clearChatBtn = document.getElementById("clear-chat-btn");
+  if (clearChatBtn) clearChatBtn.addEventListener("click", clearChat);
+
+  const openIngestBtn = document.getElementById("open-ingest-modal-btn");
+  if (openIngestBtn) openIngestBtn.addEventListener("click", () => openIngestModal());
+
+  const closeIngestBtn = document.getElementById("close-ingest-modal-btn");
+  if (closeIngestBtn) closeIngestBtn.addEventListener("click", closeIngestModal);
+
+  const cancelIngestBtn = document.getElementById("cancel-ingest-btn");
+  if (cancelIngestBtn) cancelIngestBtn.addEventListener("click", closeIngestModal);
+
+  const distillBtn = document.getElementById("distill-btn");
+  if (distillBtn) distillBtn.addEventListener("click", distillWithAI);
+
+  const commitIngestBtn = document.getElementById("commit-ingest-btn");
+  if (commitIngestBtn) commitIngestBtn.addEventListener("click", commitIngestToVault);
 }
 
 // Model Presets
@@ -493,11 +513,19 @@ async function testModelConnection() {
   }
 }
 
-// Send Agent Prompt via Cockpit
+// Send Agent Prompt via Cockpit (Supports Multi-Turn Follow-Ups)
 async function sendAgentPrompt() {
+  if (state.isSending) return;
+
   const input = document.getElementById("agent-input");
+  const sendBtn = document.getElementById("send-agent-btn");
   const prompt = input.value.trim();
   if (!prompt) return;
+
+  state.isSending = true;
+  input.disabled = true;
+  sendBtn.disabled = true;
+  sendBtn.textContent = "Thinking...";
 
   const chatContainer = document.getElementById("chat-messages");
 
@@ -518,19 +546,213 @@ async function sendAgentPrompt() {
   chatContainer.appendChild(agentDiv);
   chatContainer.scrollTop = chatContainer.scrollHeight;
 
+  // Track user turn in history
+  state.chatHistory.push({ role: "user", content: prompt });
+
   try {
     const response = await tauriInvoke("send_agent_prompt", {
       config: state.modelConfig,
       prompt,
+      history: state.chatHistory.slice(0, -1),
       vaultPath: state.vaultPath
     });
 
-    agentDiv.innerHTML = `<span class="role">${safeProvider} Agent</span><p class="whitespace-pre-wrap">${escapeHtml(response)}</p>`;
-    chatContainer.scrollTop = chatContainer.scrollHeight;
+    state.chatHistory.push({ role: "assistant", content: response });
 
-    // Refresh vault data in case agent modified anything
+    agentDiv.innerHTML = `
+      <span class="role">${safeProvider} Agent</span>
+      <p class="whitespace-pre-wrap">${escapeHtml(response)}</p>
+      <div class="mt-2 pt-2 border-t border-slate-800/80 flex items-center justify-between text-[11px]">
+        <span class="text-slate-500 font-mono text-[10px]">Context: ${escapeHtml(state.currentBranch)}</span>
+        <button class="save-to-vault-btn px-2 py-0.5 rounded text-[10px] bg-slate-800 hover:bg-slate-700 text-indigo-300 border border-slate-700/80 cursor-pointer">
+          💾 Save to Knowledge Vault
+        </button>
+      </div>
+    `;
+
+    // Hook up Save to Knowledge Vault button on message
+    const saveBtn = agentDiv.querySelector(".save-to-vault-btn");
+    if (saveBtn) {
+      saveBtn.addEventListener("click", () => {
+        openIngestModal({
+          guide: response,
+          rawText: `User query: ${prompt}\n\nAgent response:\n${response}`,
+          commitMessage: `Ingest agent discovery from prompt: ${prompt.slice(0, 40)}...`
+        });
+      });
+    }
+
+    chatContainer.scrollTop = chatContainer.scrollHeight;
     syncVaultData();
   } catch (err) {
+    console.error("Chat error:", err);
     agentDiv.innerHTML = `<span class="role text-rose-400">Error</span><p class="text-rose-400">${escapeHtml(err)}</p>`;
+  } finally {
+    state.isSending = false;
+    input.disabled = false;
+    sendBtn.disabled = false;
+    sendBtn.textContent = "Send to Agent";
+    input.focus();
+  }
+}
+
+// Clear Chat History
+function clearChat() {
+  state.chatHistory = [];
+  const chatContainer = document.getElementById("chat-messages");
+  chatContainer.innerHTML = `
+    <div class="agent-msg">
+      <span class="role">System</span>
+      <p>Conversation history reset. Agent runtime initialized with world model context from <code>${escapeHtml(state.currentBranch)}</code>. Ready to accept instructions.</p>
+    </div>
+  `;
+}
+
+// Ingestion & Territory Mapping Modal
+function openIngestModal(prefill = null) {
+  const modal = document.getElementById("ingest-modal");
+  modal.classList.remove("hidden");
+  modal.classList.add("flex");
+
+  document.getElementById("ingest-status-msg").textContent = "";
+
+  if (prefill) {
+    document.getElementById("ingest-raw-text").value = prefill.rawText || "";
+    document.getElementById("ingest-territory").value = prefill.territory || "";
+    document.getElementById("ingest-guide").value = prefill.guide || "";
+    document.getElementById("ingest-tags").value = prefill.tags ? prefill.tags.join(", ") : "general";
+    document.getElementById("ingest-commit-msg").value = prefill.commitMessage || "";
+  } else {
+    document.getElementById("ingest-raw-text").value = "";
+    document.getElementById("ingest-territory").value = "";
+    document.getElementById("ingest-guide").value = "";
+    document.getElementById("ingest-treasures").value = "";
+    document.getElementById("ingest-dead-ends").value = "";
+    document.getElementById("ingest-hazards").value = "";
+    document.getElementById("ingest-tags").value = "general";
+    document.getElementById("ingest-commit-msg").value = "";
+  }
+}
+
+function closeIngestModal() {
+  const modal = document.getElementById("ingest-modal");
+  modal.classList.add("hidden");
+  modal.classList.remove("flex");
+}
+
+async function distillWithAI() {
+  const rawText = document.getElementById("ingest-raw-text").value.trim();
+  const statusMsg = document.getElementById("ingest-status-msg");
+  const distillBtn = document.getElementById("distill-btn");
+
+  if (!rawText) {
+    statusMsg.textContent = "Please enter some unstructured notes or error logs first.";
+    statusMsg.className = "text-xs text-rose-400";
+    return;
+  }
+
+  statusMsg.textContent = "Distilling unstructured data with AI model...";
+  statusMsg.className = "text-xs text-indigo-400 animate-pulse";
+  distillBtn.disabled = true;
+
+  try {
+    const distilled = await tauriInvoke("distill_unstructured_text", {
+      config: state.modelConfig,
+      rawText
+    });
+
+    document.getElementById("ingest-territory").value = distilled.territory || "";
+    document.getElementById("ingest-guide").value = distilled.guide || "";
+    document.getElementById("ingest-tags").value = (distilled.tags || []).join(", ");
+    document.getElementById("ingest-commit-msg").value = distilled.commit_message || `Map territory: ${distilled.territory}`;
+
+    if (distilled.treasures && distilled.treasures.length > 0) {
+      document.getElementById("ingest-treasures").value = distilled.treasures
+        .map(t => `${t.description}${t.rationale ? ' - ' + t.rationale : ''}`)
+        .join("\n");
+    }
+
+    if (distilled.dead_ends && distilled.dead_ends.length > 0) {
+      document.getElementById("ingest-dead-ends").value = distilled.dead_ends
+        .map(d => `${d.description}${d.rationale ? ' - ' + d.rationale : ''}`)
+        .join("\n");
+    }
+
+    if (distilled.known_hazards && distilled.known_hazards.length > 0) {
+      document.getElementById("ingest-hazards").value = distilled.known_hazards
+        .map(h => `${h.description}${h.rationale ? ' - ' + h.rationale : ''}`)
+        .join("\n");
+    }
+
+    statusMsg.textContent = "✓ Successfully distilled! Review fields below and commit.";
+    statusMsg.className = "text-xs text-emerald-400";
+  } catch (err) {
+    statusMsg.textContent = `Distillation error: ${err}`;
+    statusMsg.className = "text-xs text-rose-400";
+  } finally {
+    distillBtn.disabled = false;
+  }
+}
+
+async function commitIngestToVault() {
+  const territory = document.getElementById("ingest-territory").value.trim();
+  const guide = document.getElementById("ingest-guide").value.trim();
+  const tagsStr = document.getElementById("ingest-tags").value.trim();
+  const commitMsg = document.getElementById("ingest-commit-msg").value.trim();
+  const statusMsg = document.getElementById("ingest-status-msg");
+
+  if (!territory || !guide) {
+    statusMsg.textContent = "Territory name and Guide are required.";
+    statusMsg.className = "text-xs text-rose-400";
+    return;
+  }
+
+  function parseLines(str) {
+    return str
+      .split("\n")
+      .map(line => line.trim())
+      .filter(line => line.length > 0)
+      .map(line => {
+        if (line.includes(" - ")) {
+          const parts = line.split(" - ");
+          return { description: parts[0].trim(), rationale: parts[1].trim() };
+        }
+        return { description: line, rationale: null };
+      });
+  }
+
+  const treasures = parseLines(document.getElementById("ingest-treasures").value);
+  const dead_ends = parseLines(document.getElementById("ingest-dead-ends").value);
+  const known_hazards = parseLines(document.getElementById("ingest-hazards").value);
+  const tags = tagsStr.split(",").map(t => t.trim()).filter(t => t.length > 0);
+
+  const input = {
+    id: null,
+    territory,
+    guide,
+    treasures,
+    dead_ends,
+    known_hazards,
+    propositions: [],
+    tags,
+    author_agent_id: "User",
+    branch: state.currentBranch,
+    commit_message: commitMsg || `Map territory: ${territory}`
+  };
+
+  statusMsg.textContent = "Saving to knowledge vault...";
+  statusMsg.className = "text-xs text-indigo-400";
+
+  try {
+    const id = await tauriInvoke("save_territory", {
+      vaultPath: state.vaultPath,
+      input
+    });
+
+    closeIngestModal();
+    await syncVaultData();
+  } catch (err) {
+    statusMsg.textContent = `Error saving territory: ${err}`;
+    statusMsg.className = "text-xs text-rose-400";
   }
 }
