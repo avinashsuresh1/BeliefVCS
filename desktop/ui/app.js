@@ -26,117 +26,25 @@ const state = {
   }
 };
 
-// Safe Tauri Invoke with Browser Mock Fallback
+// Safe Tauri Invoke with Error Handling (No Fake Mocks)
 async function tauriInvoke(cmd, args = {}) {
-  if (window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke) {
-    return await window.__TAURI__.core.invoke(cmd, args);
-  } else {
-    console.warn(`[Browser Mode] Mocking Tauri command: ${cmd}`, args);
-    return mockInvoke(cmd, args);
+  let invoker = null;
+  if (window.__TAURI__ && window.__TAURI__.core && typeof window.__TAURI__.core.invoke === "function") {
+    invoker = window.__TAURI__.core.invoke;
+  } else if (window.__TAURI_INTERNALS__ && typeof window.__TAURI_INTERNALS__.invoke === "function") {
+    invoker = window.__TAURI_INTERNALS__.invoke;
+  } else if (window.__TAURI__ && typeof window.__TAURI__.invoke === "function") {
+    invoker = window.__TAURI__.invoke;
   }
-}
 
-// Fallback Mock Data for UI Testing in standard browsers
-function mockInvoke(cmd, args) {
-  switch (cmd) {
-    case "get_vault_status":
-      return Promise.resolve({
-        current_branch: state.currentBranch,
-        branches: ["main", "hypothesis/playwright-stealth", "hypothesis/regex-parser"],
-        total_territories: 2,
-        total_commits: 4,
-        total_compilations: 3
-      });
-    case "list_branches":
-      return Promise.resolve(["main", "hypothesis/playwright-stealth", "hypothesis/regex-parser"]);
-    case "get_territories":
-      return Promise.resolve([
-        {
-          id: "1",
-          territory: "Web Scraping",
-          guide: "Use BeautifulSoup for static HTML. For SPAs, use [[Playwright]] to render JS.",
-          treasures: [{ description: "Fast parsing", rationale: "No browser DOM overhead" }],
-          dead_ends: [{ description: "Tried parsing HTML with Regex", rationale: "HTML is not regular" }],
-          known_hazards: [{ description: "Sites might block automated browsers", rationale: null }],
-          propositions: [],
-          tags: ["web", "python"],
-          wiki_links: ["Playwright"]
-        },
-        {
-          id: "2",
-          territory: "Playwright",
-          guide: "Browser automation engine capable of running headless Chromium.",
-          treasures: [{ description: "Bypasses Turnstile", rationale: "Masks webdriver property" }],
-          dead_ends: [],
-          known_hazards: [],
-          propositions: [{ claim: "Playwright stealth masks webdriver flags", premises: [], rationale: null, status: "PROVEN" }],
-          tags: ["automation", "browser"],
-          wiki_links: []
-        }
-      ]);
-    case "get_commit_history":
-      return Promise.resolve([
-        {
-          id: "9fbc8e9d",
-          branch: "main",
-          message: "Deploy verified hypothesis: merge 'hypothesis/playwright-stealth' into 'main'",
-          author_agent_id: "Agent_A",
-          timestamp: Date.now() / 1000 - 300,
-          has_evidence: true,
-          evidence_exit_code: 0
-        },
-        {
-          id: "c87dae2c",
-          branch: "hypothesis/playwright-stealth",
-          message: "Validated stealth plugin on Cloudflare Turnstile probe",
-          author_agent_id: "Agent_A",
-          timestamp: Date.now() / 1000 - 600,
-          has_evidence: true,
-          evidence_exit_code: 0
-        }
-      ]);
-    case "get_compilations":
-      return Promise.resolve([
-        {
-          branch: "hypothesis/playwright-stealth",
-          passed: true,
-          message: "Build SUCCESS: Hypothesis verified by probe test.",
-          test_command: "python test_scraper_probe.py",
-          exit_code: 0,
-          proof_sound: true,
-          violations: []
-        },
-        {
-          branch: "hypothesis/regex-parser",
-          passed: false,
-          message: "Build FAILED (Proof Inconsistency): Contradicts established Dead End.",
-          test_command: "python test_regex.py",
-          exit_code: -1,
-          proof_sound: false,
-          violations: ["Contradicts established Dead End: 'Tried parsing HTML with Regex'"]
-        }
-      ]);
-    case "get_knowledge_graph":
-      return Promise.resolve({
-        nodes: [
-          { id: "Web Scraping", label: "Web Scraping", group: "territory" },
-          { id: "Playwright", label: "Playwright", group: "axiom" }
-        ],
-        edges: [
-          { source: "Web Scraping", target: "Playwright" }
-        ]
-      });
-    case "test_model_connection":
-      return Promise.resolve({
-        connected: true,
-        latency_ms: 42,
-        message: `Connected to ${args.config.provider} (${args.config.model_name}) in 42ms`
-      });
-    case "send_agent_prompt":
-      return Promise.resolve(`[Agent Response via ${args.config.provider}]: I searched the knowledge vault on '${state.currentBranch}'. Based on our proven axioms, I recommend using Playwright with stealth flags rather than regex.`);
-    default:
-      return Promise.reject("Unknown mock command");
+  if (invoker) {
+    return await invoker(cmd, args);
   }
+
+  console.error(`[IPC Error] Desktop runtime (Rust/Tauri) not detected for '${cmd}'.`);
+  throw new Error(
+    `Native desktop backend is not connected. Please run the desktop application using 'cargo run' or './desktop/run.ps1'.`
+  );
 }
 
 // UI Initialization

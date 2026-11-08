@@ -8,6 +8,12 @@ if [ -d "$HOME/.cargo/bin" ] && [[ ":$PATH:" != *":$HOME/.cargo/bin:"* ]]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR/.." || exit 1
+if [ -f "$SCRIPT_DIR/src-tauri/Cargo.toml" ]; then
+    MANIFEST="$SCRIPT_DIR/src-tauri/Cargo.toml"
+elif [ -f "src-tauri/Cargo.toml" ]; then
+    MANIFEST="src-tauri/Cargo.toml"
+else
+    MANIFEST="desktop/src-tauri/Cargo.toml"
+fi
 
-cargo run --manifest-path "$SCRIPT_DIR/src-tauri/Cargo.toml"
+cargo run --manifest-path "$MANIFEST"

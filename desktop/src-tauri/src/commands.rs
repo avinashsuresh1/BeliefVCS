@@ -2,9 +2,26 @@ use crate::model_client::{ChatMessage, HealthCheckResult, ModelClient, ModelConf
 use crate::vcs_watcher::{CommitItem, CompilationItem, GraphData, TerritoryCard, VaultStatus, VcsWatcher};
 use std::path::PathBuf;
 
+/// Resolve vault path safely whether executed from root, desktop/, or src-tauri/
+fn resolve_vault_path(raw_path: &str) -> PathBuf {
+    let p = PathBuf::from(raw_path);
+    if p.exists() {
+        return p;
+    }
+    let parent = PathBuf::from("..").join(raw_path);
+    if parent.exists() {
+        return parent;
+    }
+    let grandparent = PathBuf::from("../..").join(raw_path);
+    if grandparent.exists() {
+        return grandparent;
+    }
+    p
+}
+
 #[tauri::command]
 pub fn get_vault_status(vault_path: String) -> Result<VaultStatus, String> {
-    let path = PathBuf::from(&vault_path);
+    let path = resolve_vault_path(&vault_path);
     if !path.exists() {
         return Err(format!("Vault directory does not exist: {}", vault_path));
     }
@@ -13,7 +30,7 @@ pub fn get_vault_status(vault_path: String) -> Result<VaultStatus, String> {
 
 #[tauri::command]
 pub fn list_branches(vault_path: String) -> Result<Vec<String>, String> {
-    let path = PathBuf::from(&vault_path);
+    let path = resolve_vault_path(&vault_path);
     if !path.exists() {
         return Err(format!("Vault directory does not exist: {}", vault_path));
     }
@@ -22,7 +39,7 @@ pub fn list_branches(vault_path: String) -> Result<Vec<String>, String> {
 
 #[tauri::command]
 pub fn get_territories(vault_path: String, branch: Option<String>) -> Result<Vec<TerritoryCard>, String> {
-    let path = PathBuf::from(&vault_path);
+    let path = resolve_vault_path(&vault_path);
     if !path.exists() {
         return Err(format!("Vault directory does not exist: {}", vault_path));
     }
@@ -31,7 +48,7 @@ pub fn get_territories(vault_path: String, branch: Option<String>) -> Result<Vec
 
 #[tauri::command]
 pub fn get_commit_history(vault_path: String) -> Result<Vec<CommitItem>, String> {
-    let path = PathBuf::from(&vault_path);
+    let path = resolve_vault_path(&vault_path);
     if !path.exists() {
         return Err(format!("Vault directory does not exist: {}", vault_path));
     }
@@ -40,7 +57,7 @@ pub fn get_commit_history(vault_path: String) -> Result<Vec<CommitItem>, String>
 
 #[tauri::command]
 pub fn get_compilations(vault_path: String) -> Result<Vec<CompilationItem>, String> {
-    let path = PathBuf::from(&vault_path);
+    let path = resolve_vault_path(&vault_path);
     if !path.exists() {
         return Err(format!("Vault directory does not exist: {}", vault_path));
     }
@@ -49,7 +66,7 @@ pub fn get_compilations(vault_path: String) -> Result<Vec<CompilationItem>, Stri
 
 #[tauri::command]
 pub fn get_knowledge_graph(vault_path: String, branch: Option<String>) -> Result<GraphData, String> {
-    let path = PathBuf::from(&vault_path);
+    let path = resolve_vault_path(&vault_path);
     if !path.exists() {
         return Err(format!("Vault directory does not exist: {}", vault_path));
     }
@@ -67,7 +84,7 @@ pub async fn send_agent_prompt(
     prompt: String,
     vault_path: String,
 ) -> Result<String, String> {
-    let path = PathBuf::from(&vault_path);
+    let path = resolve_vault_path(&vault_path);
     let status = if path.exists() {
         VcsWatcher::get_status(&path)
     } else {
@@ -116,4 +133,22 @@ pub async fn send_agent_prompt(
     ];
 
     ModelClient::chat_completion(&config, &messages).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_resolve_vault_path_nonexistent() {
+        let p = resolve_vault_path("non_existent_folder_xyz_123");
+        assert_eq!(p, PathBuf::from("non_existent_folder_xyz_123"));
+    }
+
+    #[test]
+    fn test_resolve_vault_path_existing() {
+        // Cargo.toml exists either in root or src-tauri depending on execution directory
+        let p = resolve_vault_path("Cargo.toml");
+        assert!(p.exists());
+    }
 }

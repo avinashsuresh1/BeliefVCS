@@ -15,9 +15,14 @@ foreach ($dir in $CargoCandidates) {
     }
 }
 
-# Run from project root
-$ProjectRoot = Resolve-Path "$PSScriptRoot\.."
-Set-Location $ProjectRoot
+# Determine Manifest Path regardless of whether run from root or desktop/
+if (Test-Path "$PSScriptRoot\src-tauri\Cargo.toml") {
+    $ManifestPath = "$PSScriptRoot\src-tauri\Cargo.toml"
+} elseif (Test-Path "src-tauri\Cargo.toml") {
+    $ManifestPath = "src-tauri\Cargo.toml"
+} else {
+    $ManifestPath = "desktop\src-tauri\Cargo.toml"
+}
 
-cargo run --manifest-path "$PSScriptRoot\src-tauri\Cargo.toml"
+cargo run --manifest-path "$ManifestPath"
 
