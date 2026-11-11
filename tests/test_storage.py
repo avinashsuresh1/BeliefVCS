@@ -58,6 +58,13 @@ def test_storage_multiple_items(temp_md_storage):
     all_exp = temp_md_storage.get_all()
     assert len(all_exp) == 2
 
+def test_markdown_storage_surfaces_malformed_records(temp_md_storage):
+    with open(os.path.join(temp_md_storage.directory_path, "broken.md"), "w", encoding="utf-8") as file:
+        file.write("not valid frontmatter")
+
+    with pytest.raises(ValueError, match="Invalid markdown format"):
+        temp_md_storage.get_all()
+
 def test_vcs_storage_path_traversal_rejection():
     temp_dir = tempfile.mkdtemp()
     try:

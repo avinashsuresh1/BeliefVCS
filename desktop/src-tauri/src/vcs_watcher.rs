@@ -20,6 +20,8 @@ pub struct ObservationItem {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PropositionItem {
+    #[serde(default)]
+    pub id: String,
     pub claim: String,
     pub premises: Vec<String>,
     pub rationale: Option<String>,
@@ -57,9 +59,15 @@ pub struct CompilationItem {
     pub passed: bool,
     pub message: String,
     pub test_command: String,
+    pub validation_profile: Option<String>,
+    pub revision_digest: Option<String>,
     pub exit_code: i32,
     pub proof_sound: Option<bool>,
+    pub proof_verdict: Option<String>,
     pub proof_violations: Vec<String>,
+    pub candidate_conflicts: Vec<String>,
+    pub supporting_ids: Vec<String>,
+    pub counterevidence_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -84,6 +92,17 @@ pub struct GraphData {
 pub struct VcsWatcher;
 
 impl VcsWatcher {
+    fn parse_scalar(value: &str) -> String {
+        let trimmed = value.trim();
+        if trimmed.starts_with('"') {
+            serde_json::from_str::<String>(trimmed).unwrap_or_else(|_| trimmed.to_string())
+        } else if trimmed.len() >= 2 && trimmed.starts_with('\'') && trimmed.ends_with('\'') {
+            trimmed[1..trimmed.len() - 1].replace("''", "'")
+        } else {
+            trimmed.to_string()
+        }
+    }
+
     /// Read HEAD to find active branch name
     pub fn get_current_branch(vault_path: &Path) -> String {
         let head_path = vault_path.join(".vcs").join("HEAD");
@@ -118,21 +137,21 @@ impl VcsWatcher {
     }
 
     /// Read comprehensive vault status
-    pub fn get_status(vault_path: &Path) -> VaultStatus {
+    pub fn get_status(vault_path: &Path) -> Result<VaultStatus, String> {
         let current_branch = Self::get_current_branch(vault_path);
         let branches = Self::list_branches(vault_path);
 
-        let territories = Self::get_territories(vault_path, Some(&current_branch));
+        let territories = Self::get_territories(vault_path, Some(&current_branch))?;
         let commits = Self::get_commits(vault_path);
         let compilations = Self::get_compilations(vault_path);
 
-        VaultStatus {
+        Ok(VaultStatus {
             current_branch,
             branches,
             total_territories: territories.len(),
             total_commits: commits.len(),
             total_compilations: compilations.len(),
-        }
+        })
     }
 
     /// Sanitize branch name preventing path traversal
@@ -145,44 +164,48 @@ impl VcsWatcher {
     }
 
     /// Parse markdown files from working tree or specific branch
-    pub fn get_territories(vault_path: &Path, branch: Option<&str>) -> Vec<TerritoryCard> {
+    pub fn get_territories(vault_path: &Path, branch: Option<&str>) -> Result<Vec<TerritoryCard>, String> {
         let target_dir: PathBuf = match branch {
-            Some(b) if b != "main" => {
-                if let Some(sanitized) = Self::sanitize_branch_name(b) {
-                    let b_dir = vault_path.join(".vcs").join("branches").join(sanitized);
-                    if b_dir.exists() {
-                        b_dir
-                    } else {
-                        vault_path.to_path_buf()
-                    }
+            Some(b) => {
+                let sanitized = Self::sanitize_branch_name(b)
+                    .ok_or_else(|| format!("Invalid branch name: {}", b))?;
+                let branches_dir = vault_path.join(".vcs").join("branches");
+                let branch_dir = branches_dir.join(sanitized);
+                if branch_dir.exists() {
+                    branch_dir
+                } else if branches_dir.exists() {
+                    return Err(format!("Branch '{}' does not exist in this vault", b));
                 } else {
                     vault_path.to_path_buf()
                 }
             }
-            _ => vault_path.to_path_buf(),
+            None => vault_path.to_path_buf(),
         };
 
         let mut territories = Vec::new();
         if !target_dir.exists() {
-            return territories;
+            return Ok(territories);
         }
 
         let link_re = Regex::new(r"\[\[(.*?)\]\]").unwrap();
 
-        if let Ok(entries) = fs::read_dir(target_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().map(|e| e == "md").unwrap_or(false) {
-                    if let Ok(content) = fs::read_to_string(&path) {
-                        if let Some(card) = Self::parse_markdown_territory(&content, &link_re) {
-                            territories.push(card);
-                        }
-                    }
-                }
+        let entries = fs::read_dir(&target_dir).map_err(|e| {
+            format!("Failed to read knowledge directory {}: {}", target_dir.display(), e)
+        })?;
+        for entry in entries {
+            let entry = entry.map_err(|e| format!("Failed to read knowledge entry: {}", e))?;
+            let path = entry.path();
+            if path.extension().map(|e| e == "md").unwrap_or(false) {
+                let content = fs::read_to_string(&path).map_err(|e| {
+                    format!("Failed to read knowledge file {}: {}", path.display(), e)
+                })?;
+                let card = Self::parse_markdown_territory(&content, &link_re)
+                    .ok_or_else(|| format!("Malformed knowledge file: {}", path.display()))?;
+                territories.push(card);
             }
         }
 
-        territories
+        Ok(territories)
     }
 
     fn parse_markdown_territory(content: &str, link_re: &Regex) -> Option<TerritoryCard> {
@@ -214,20 +237,24 @@ impl VcsWatcher {
         let mut treasures = Vec::new();
         let mut dead_ends = Vec::new();
         let mut known_hazards = Vec::new();
-        let mut propositions = Vec::new();
+        let mut propositions: Vec<PropositionItem> = Vec::new();
 
         let mut current_section = "";
 
         for line in yaml_str.lines() {
             let trimmed = line.trim();
-            if trimmed.starts_with("id:") {
-                id = trimmed.trim_start_matches("id:").trim().to_string();
+            if trimmed.starts_with("id:") && current_section == "propositions" {
+                if let Some(proposition) = propositions.last_mut() {
+                    proposition.id = Self::parse_scalar(trimmed.trim_start_matches("id:"));
+                }
+            } else if line.starts_with("id:") {
+                id = Self::parse_scalar(trimmed.trim_start_matches("id:"));
                 current_section = "";
-            } else if trimmed.starts_with("territory:") {
-                territory = trimmed.trim_start_matches("territory:").trim().to_string();
+            } else if line.starts_with("territory:") {
+                territory = Self::parse_scalar(trimmed.trim_start_matches("territory:"));
                 current_section = "";
-            } else if trimmed.starts_with("author_agent_id:") {
-                author_agent_id = Some(trimmed.trim_start_matches("author_agent_id:").trim().to_string());
+            } else if line.starts_with("author_agent_id:") {
+                author_agent_id = Some(Self::parse_scalar(trimmed.trim_start_matches("author_agent_id:")));
                 current_section = "";
             } else if trimmed.starts_with("treasures:") {
                 current_section = "treasures";
@@ -241,6 +268,19 @@ impl VcsWatcher {
                 current_section = "tags";
             } else if trimmed.starts_with("- ") {
                 let mut item = trimmed.trim_start_matches("- ").trim().to_string();
+                if current_section == "propositions" && item.starts_with("id:") {
+                    propositions.push(PropositionItem {
+                        id: Self::parse_scalar(item.trim_start_matches("id:")),
+                        claim: String::new(),
+                        premises: vec![],
+                        rationale: None,
+                        status: "CONJECTURE".to_string(),
+                    });
+                    continue;
+                }
+                if current_section != "propositions" && item.starts_with("id:") {
+                    continue;
+                }
                 if item.starts_with("description:") {
                     item = item.trim_start_matches("description:").trim().to_string();
                 } else if item.starts_with("claim:") {
@@ -248,29 +288,35 @@ impl VcsWatcher {
                 }
 
                 match current_section {
-                    "tags" => tags.push(item),
+                    "tags" => tags.push(Self::parse_scalar(&item)),
                     "treasures" => treasures.push(ObservationItem {
-                        description: item,
+                        description: Self::parse_scalar(&item),
                         rationale: None,
                     }),
                     "dead_ends" => dead_ends.push(ObservationItem {
-                        description: item,
+                        description: Self::parse_scalar(&item),
                         rationale: None,
                     }),
                     "known_hazards" => known_hazards.push(ObservationItem {
-                        description: item,
+                        description: Self::parse_scalar(&item),
                         rationale: None,
                     }),
                     "propositions" => propositions.push(PropositionItem {
-                        claim: item,
+                        id: String::new(),
+                        claim: Self::parse_scalar(&item),
                         premises: vec![],
                         rationale: None,
-                        status: "PROVEN".to_string(),
+                        status: "CONJECTURE".to_string(),
                     }),
+                    "proposition_premises" => {
+                        if let Some(proposition) = propositions.last_mut() {
+                            proposition.premises.push(Self::parse_scalar(&item));
+                        }
+                    }
                     _ => {}
                 }
             } else if trimmed.starts_with("description:") {
-                let desc = trimmed.trim_start_matches("description:").trim().to_string();
+                let desc = Self::parse_scalar(trimmed.trim_start_matches("description:"));
                 match current_section {
                     "treasures" => {
                         treasures.push(ObservationItem {
@@ -293,13 +339,33 @@ impl VcsWatcher {
                     _ => {}
                 }
             } else if trimmed.starts_with("claim:") {
-                let claim = trimmed.trim_start_matches("claim:").trim().to_string();
-                propositions.push(PropositionItem {
-                    claim,
-                    premises: vec![],
-                    rationale: None,
-                    status: "PROVEN".to_string(),
-                });
+                let claim = Self::parse_scalar(trimmed.trim_start_matches("claim:"));
+                if let Some(proposition) = propositions.last_mut() {
+                    proposition.claim = claim;
+                } else {
+                    propositions.push(PropositionItem {
+                        id: String::new(),
+                        claim,
+                        premises: vec![],
+                        rationale: None,
+                        status: "CONJECTURE".to_string(),
+                    });
+                }
+                current_section = "propositions";
+            } else if trimmed.starts_with("premises:") && current_section == "propositions" {
+                current_section = "proposition_premises";
+            } else if trimmed.starts_with("status:")
+                && (current_section == "propositions" || current_section == "proposition_premises")
+            {
+                if let Some(proposition) = propositions.last_mut() {
+                    let status = Self::parse_scalar(trimmed.trim_start_matches("status:"));
+                    proposition.status = if status == "PROVEN" {
+                        "LEGACY_PROVEN".to_string()
+                    } else {
+                        status
+                    };
+                }
+                current_section = "propositions";
             } else if trimmed.starts_with("rationale:") {
                 let rat = trimmed.trim_start_matches("rationale:").trim().to_string();
                 if rat != "null" && !rat.is_empty() {
@@ -316,15 +382,26 @@ impl VcsWatcher {
                         }
                         "known_hazards" => {
                             if let Some(last) = known_hazards.last_mut() {
-                                last.rationale = Some(rat);
+                                last.rationale = Some(Self::parse_scalar(&rat));
+                            }
+                        }
+                        "propositions" | "proposition_premises" => {
+                            if let Some(last) = propositions.last_mut() {
+                                last.rationale = Some(Self::parse_scalar(&rat));
                             }
                         }
                         _ => {}
                     }
                 }
+                if current_section == "proposition_premises" {
+                    current_section = "propositions";
+                }
             }
         }
 
+        if territory.trim().is_empty() {
+            return None;
+        }
         if id.is_empty() {
             id = territory.clone();
         }
@@ -404,14 +481,39 @@ impl VcsWatcher {
                                 let message = val["message"].as_str().unwrap_or("").to_string();
                                 let test_command = val["evidence"]["test_command"].as_str().unwrap_or("").to_string();
                                 let exit_code = val["evidence"]["exit_code"].as_i64().unwrap_or(-1) as i32;
+                                let validation_profile = val["validation_profile"]
+                                    .as_str()
+                                    .map(|s| s.to_string());
+                                let revision_digest = val["revision_digest"]
+                                    .as_str()
+                                    .map(|s| s.to_string());
 
                                 let proof_sound = val["proof_verification"]["sound"].as_bool();
+                                let proof_verdict = val["proof_verification"]["verdict"]
+                                    .as_str()
+                                    .map(|s| s.to_string());
                                 let mut violations = Vec::new();
+                                let mut candidate_conflicts = Vec::new();
+                                let mut supporting_ids = Vec::new();
+                                let mut counterevidence_ids = Vec::new();
                                 if let Some(arr) = val["proof_verification"]["violations"].as_array() {
                                     for v in arr {
                                         if let Some(s) = v.as_str() {
                                             violations.push(s.to_string());
                                         }
+                                    }
+                                }
+                                for (key, values) in [
+                                    ("candidate_conflicts", &mut candidate_conflicts),
+                                    ("supporting_ids", &mut supporting_ids),
+                                    ("counterevidence_ids", &mut counterevidence_ids),
+                                ] {
+                                    if let Some(arr) = val["proof_verification"][key].as_array() {
+                                        values.extend(
+                                            arr.iter().filter_map(|value| {
+                                                value.as_str().map(|s| s.to_string())
+                                            }),
+                                        );
                                     }
                                 }
 
@@ -420,9 +522,15 @@ impl VcsWatcher {
                                     passed,
                                     message,
                                     test_command,
+                                    validation_profile,
+                                    revision_digest,
                                     exit_code,
                                     proof_sound,
+                                    proof_verdict,
                                     proof_violations: violations,
+                                    candidate_conflicts,
+                                    supporting_ids,
+                                    counterevidence_ids,
                                 });
                             }
                         }
@@ -435,8 +543,8 @@ impl VcsWatcher {
     }
 
     /// Build topological network graph of territories and wiki-links
-    pub fn get_knowledge_graph(vault_path: &Path, branch: Option<&str>) -> GraphData {
-        let territories = Self::get_territories(vault_path, branch);
+    pub fn get_knowledge_graph(vault_path: &Path, branch: Option<&str>) -> Result<GraphData, String> {
+        let territories = Self::get_territories(vault_path, branch)?;
         let mut nodes = Vec::new();
         let mut edges = Vec::new();
 
@@ -446,7 +554,7 @@ impl VcsWatcher {
             nodes.push(GraphNode {
                 id: t.territory.clone(),
                 label: t.territory.clone(),
-                group: if t.propositions.is_empty() { "territory".to_string() } else { "axiom".to_string() },
+                group: if t.propositions.is_empty() { "territory".to_string() } else { "proposition".to_string() },
             });
 
             for link in &t.wiki_links {
@@ -466,7 +574,7 @@ impl VcsWatcher {
             }
         }
 
-        GraphData { nodes, edges }
+        Ok(GraphData { nodes, edges })
     }
 }
 
@@ -503,6 +611,37 @@ Use [[Playwright]] for SPAs.
         assert_eq!(card.treasures[0].rationale, Some("C parser".to_string()));
         assert_eq!(card.dead_ends.len(), 1);
         assert_eq!(card.dead_ends[0].description, "Used Regex");
+    }
+
+    #[test]
+    fn test_parse_proposition_keeps_id_and_status() {
+        let raw = r#"---
+id: territory-1
+territory: Claims
+treasures:
+- id: observation-1
+  description: "A supporting observation."
+propositions:
+- id: proposition-1
+  claim: "A scoped claim."
+  premises:
+    - "A cited premise."
+  rationale: "Proposed reasoning."
+  status: CONJECTURE
+---
+# Guide
+Review the claim.
+"#;
+        let link_re = Regex::new(r"\[\[(.*?)\]\]").unwrap();
+        let card = VcsWatcher::parse_markdown_territory(raw, &link_re).unwrap();
+        assert_eq!(card.id, "territory-1");
+        assert_eq!(card.treasures.len(), 1);
+        assert_eq!(card.treasures[0].description, "A supporting observation.");
+        assert_eq!(card.propositions.len(), 1);
+        assert_eq!(card.propositions[0].id, "proposition-1");
+        assert_eq!(card.propositions[0].claim, "A scoped claim.");
+        assert_eq!(card.propositions[0].premises, vec!["A cited premise.".to_string()]);
+        assert_eq!(card.propositions[0].status, "CONJECTURE");
     }
 
     #[test]
@@ -559,5 +698,21 @@ Destination node.
         assert_eq!(VcsWatcher::sanitize_branch_name("foo/../../bar"), None);
         assert_eq!(VcsWatcher::sanitize_branch_name("c:secret"), None);
         assert_eq!(VcsWatcher::sanitize_branch_name("   "), None);
+    }
+
+    #[test]
+    fn test_territory_read_surfaces_malformed_markdown() {
+        let vault = std::env::temp_dir().join(format!(
+            "belief_malformed_vault_{}",
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)
+        ));
+        let main_dir = vault.join(".vcs").join("branches").join("main");
+        std::fs::create_dir_all(&main_dir).unwrap();
+        std::fs::write(main_dir.join("broken.md"), "not valid frontmatter").unwrap();
+
+        let error = VcsWatcher::get_territories(&vault, Some("main")).unwrap_err();
+        assert!(error.contains("Malformed knowledge file"));
+
+        std::fs::remove_dir_all(vault).unwrap();
     }
 }

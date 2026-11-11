@@ -5,9 +5,9 @@ Demonstrating how AI agents use Version Control for Beliefs & Hypotheses:
 New information = Feature request
 Main branch = Status quo = Existing knowledge
 Branch = Hypothesis development = Feature development
-Code compiling = Hypothesis testing (deterministic verification)
-Build success = New information verified (Evidence minted)
-Deploy = Update main branch = Update status quo
+Probe execution = A scoped test run (not a truth determination)
+Probe success = Command exited successfully; claim remains provisional
+Deploy = Integrate the branch while preserving proposition status
 """
 
 import os
@@ -84,7 +84,7 @@ def main():
     print("\n[7. BELIEF TESTING / COMPILING - Test Run 2 (Passing Hypothesis)]")
     pass_compile = tools.test_hypothesis(f'"{sys.executable}" -c "print(\'Probe passed: 200 OK received\'); exit(0)"')
     print(f"Compile Status: {pass_compile['message']}")
-    print(f"Evidence minted! ID: {pass_compile['evidence']['id']}")
+    print(f"Probe evidence recorded. ID: {pass_compile['evidence']['id']}")
 
     # 8. Deploy to Production (Merge to main)
     print("\n[8. DEPLOY / RELEASE: UPDATE MAIN (Update Status Quo)]")

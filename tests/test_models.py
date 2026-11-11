@@ -14,9 +14,15 @@ def test_expertise_to_dict():
     d = exp.to_dict()
     assert d["territory"] == "Writing tests"
     assert d["guide"] == "Use pytest fixtures"
-    assert d["treasures"] == [{"description": "Tests run much faster", "rationale": "Fixtures are cached"}]
-    assert d["dead_ends"] == [{"description": "Using global variables", "rationale": "Causes state leakage"}]
-    assert d["known_hazards"] == [{"description": "Shared state bugs", "rationale": "Hard to debug"}]
+    assert d["treasures"][0]["description"] == "Tests run much faster"
+    assert d["treasures"][0]["rationale"] == "Fixtures are cached"
+    assert d["treasures"][0]["id"] == exp.treasures[0].id
+    assert d["dead_ends"][0]["description"] == "Using global variables"
+    assert d["dead_ends"][0]["rationale"] == "Causes state leakage"
+    assert d["dead_ends"][0]["id"] == exp.dead_ends[0].id
+    assert d["known_hazards"][0]["description"] == "Shared state bugs"
+    assert d["known_hazards"][0]["rationale"] == "Hard to debug"
+    assert d["known_hazards"][0]["id"] == exp.known_hazards[0].id
     assert d["tags"] == ["a"]
     assert d["author_agent_id"] == "agent1"
     assert "id" in d

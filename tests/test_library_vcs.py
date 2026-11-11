@@ -3,6 +3,7 @@ import os
 import shutil
 import tempfile
 import sys
+import subprocess
 from library4agents.models import Expertise, Observation
 from library4agents.storage import VCSMarkdownStorage, UnverifiedHypothesisError
 from library4agents.library import Library
@@ -53,7 +54,7 @@ def test_belief_compilation_success(temp_vcs_library):
     res = temp_vcs_library.compile(f'"{sys.executable}" -c "exit(0)"')
     assert res.passed is True
     assert res.evidence.exit_code == 0
-    assert "Build SUCCESS" in res.message
+    assert "Probe PASSED" in res.message
 
 def test_belief_compilation_failure(temp_vcs_library):
     temp_vcs_library.branch("hypothesis/test-fail")
@@ -62,7 +63,7 @@ def test_belief_compilation_failure(temp_vcs_library):
     res = temp_vcs_library.compile(f'"{sys.executable}" -c "exit(1)"')
     assert res.passed is False
     assert res.evidence.exit_code == 1
-    assert "Build FAILURE" in res.message
+    assert "Probe FAILED" in res.message
 
 def test_merge_guard_blocks_unverified_branch(temp_vcs_library):
     temp_vcs_library.branch("hypothesis/untested")
@@ -85,6 +86,33 @@ def test_merge_guard_blocks_failing_branch(temp_vcs_library):
     # Attempting to deploy failing hypothesis to main must raise UnverifiedHypothesisError
     with pytest.raises(UnverifiedHypothesisError):
         temp_vcs_library.merge("hypothesis/failing", target_branch="main")
+
+def test_merge_guard_rejects_changes_after_passing_probe(temp_vcs_library):
+    temp_vcs_library.branch("hypothesis/stale-probe")
+    temp_vcs_library.checkout("hypothesis/stale-probe")
+
+    temp_vcs_library.contribute(
+        Expertise(territory="Before probe", guide="Initial hypothesis")
+    )
+    result = temp_vcs_library.compile(f'"{sys.executable}" -c "exit(0)"')
+    assert result.passed is True
+
+    temp_vcs_library.contribute(
+        Expertise(territory="After probe", guide="Changed after testing")
+    )
+    with pytest.raises(UnverifiedHypothesisError, match="changed after the last successful probe"):
+        temp_vcs_library.merge("hypothesis/stale-probe", target_branch="main")
+
+def test_probe_timeout_is_recorded_as_failure(temp_vcs_library, monkeypatch):
+    def timeout(*args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd=args[0], timeout=300, output="partial")
+
+    monkeypatch.setattr("library4agents.library.subprocess.run", timeout)
+    result = temp_vcs_library.compile("test-command")
+    assert result.passed is False
+    assert result.evidence.exit_code == -1
+    assert "timed out after 300 seconds" in result.evidence.output_log
+    assert "partial" in result.evidence.output_log
 
 def test_successful_merge_deploys_to_main(temp_vcs_library):
     # 1. Start hypothesis
@@ -114,6 +142,41 @@ def test_successful_merge_deploys_to_main(temp_vcs_library):
     main_results = temp_vcs_library.find(query="Verified Territory")
     assert len(main_results) == 1
     assert main_results[0].guide == "Empirically tested approach"
+
+def test_merge_preserves_independent_target_changes(temp_vcs_library):
+    base = Expertise(territory="Base", guide="Shared starting point")
+    temp_vcs_library.contribute(base)
+    temp_vcs_library.branch("hypothesis/independent")
+    temp_vcs_library.checkout("hypothesis/independent")
+
+    temp_vcs_library.contribute(Expertise(territory="Hypothesis", guide="Branch addition"))
+    temp_vcs_library.compile(f'"{sys.executable}" -c "exit(0)"')
+
+    temp_vcs_library.checkout("main")
+    temp_vcs_library.contribute(Expertise(territory="Independent main change", guide="Keep this"))
+    temp_vcs_library.merge("hypothesis/independent", target_branch="main")
+
+    territories = {item.territory for item in temp_vcs_library.find()}
+    assert territories == {"Base", "Hypothesis", "Independent main change"}
+
+def test_merge_rejects_conflicting_target_changes(temp_vcs_library):
+    original = Expertise(territory="Shared", guide="Starting point")
+    temp_vcs_library.contribute(original)
+    temp_vcs_library.branch("hypothesis/conflicting")
+    temp_vcs_library.checkout("hypothesis/conflicting")
+
+    original.guide = "Hypothesis change"
+    temp_vcs_library.contribute(original)
+    temp_vcs_library.compile(f'"{sys.executable}" -c "exit(0)"')
+
+    temp_vcs_library.checkout("main")
+    main_record = temp_vcs_library.find()[0]
+    main_record.guide = "Independent main change"
+    temp_vcs_library.contribute(main_record)
+
+    with pytest.raises(UnverifiedHypothesisError, match="both branches changed"):
+        temp_vcs_library.merge("hypothesis/conflicting", target_branch="main")
+    assert temp_vcs_library.find()[0].guide == "Independent main change"
 
 def test_vcs_tools_workflow(monkeypatch):
     temp_dir = tempfile.mkdtemp()

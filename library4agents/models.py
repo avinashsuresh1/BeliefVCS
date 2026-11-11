@@ -7,9 +7,11 @@ from typing import List, Optional, Dict, Any
 class Observation:
     description: str
     rationale: Optional[str] = None
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
 
     def to_dict(self) -> dict:
         return {
+            "id": self.id,
             "description": self.description,
             "rationale": self.rationale
         }
@@ -17,6 +19,7 @@ class Observation:
     @classmethod
     def from_dict(cls, data: dict) -> 'Observation':
         return cls(
+            id=data.get("id", str(uuid.uuid4())),
             description=data.get("description", ""),
             rationale=data.get("rationale")
         )
@@ -50,23 +53,41 @@ class Evidence:
 
 @dataclass
 class ProofVerification:
-    sound: bool
+    sound: Optional[bool] = None
     violations: List[str] = field(default_factory=list)
     explanation: str = ""
+    verdict: str = "UNRESOLVED"
+    supporting_ids: List[str] = field(default_factory=list)
+    counterevidence_ids: List[str] = field(default_factory=list)
+    candidate_conflicts: List[str] = field(default_factory=list)
+    assumptions: List[str] = field(default_factory=list)
+    testable_predictions: List[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
             "sound": self.sound,
             "violations": self.violations,
-            "explanation": self.explanation
+            "explanation": self.explanation,
+            "verdict": self.verdict,
+            "supporting_ids": self.supporting_ids,
+            "counterevidence_ids": self.counterevidence_ids,
+            "candidate_conflicts": self.candidate_conflicts,
+            "assumptions": self.assumptions,
+            "testable_predictions": self.testable_predictions
         }
 
     @classmethod
     def from_dict(cls, data: dict) -> 'ProofVerification':
         return cls(
-            sound=data.get("sound", False),
+            sound=data.get("sound"),
             violations=data.get("violations", []),
-            explanation=data.get("explanation", "")
+            explanation=data.get("explanation", ""),
+            verdict=data.get("verdict", "UNRESOLVED"),
+            supporting_ids=data.get("supporting_ids", []),
+            counterevidence_ids=data.get("counterevidence_ids", []),
+            candidate_conflicts=data.get("candidate_conflicts", []),
+            assumptions=data.get("assumptions", []),
+            testable_predictions=data.get("testable_predictions", [])
         )
 
 @dataclass
@@ -74,7 +95,7 @@ class Proposition:
     claim: str
     premises: List[str] = field(default_factory=list)
     rationale: Optional[str] = None
-    status: str = "CONJECTURE"  # CONJECTURE, PROVEN, REFUTED
+    status: str = "CONJECTURE"
     evidence: Optional[Evidence] = None
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
 
@@ -90,12 +111,15 @@ class Proposition:
 
     @classmethod
     def from_dict(cls, data: dict) -> 'Proposition':
+        status = data.get("status", "CONJECTURE")
+        if status == "PROVEN":
+            status = "LEGACY_PROVEN"
         return cls(
             id=data.get("id", str(uuid.uuid4())),
             claim=data.get("claim", ""),
             premises=data.get("premises", []),
             rationale=data.get("rationale"),
-            status=data.get("status", "CONJECTURE"),
+            status=status,
             evidence=Evidence.from_dict(data["evidence"]) if data.get("evidence") else None
         )
 
@@ -105,13 +129,15 @@ class CompilationResult:
     evidence: Evidence
     message: str
     proof_verification: Optional[ProofVerification] = None
+    revision_digest: Optional[str] = None
 
     def to_dict(self) -> dict:
         return {
             "passed": self.passed,
             "evidence": self.evidence.to_dict(),
             "message": self.message,
-            "proof_verification": self.proof_verification.to_dict() if self.proof_verification else None
+            "proof_verification": self.proof_verification.to_dict() if self.proof_verification else None,
+            "revision_digest": self.revision_digest
         }
 
 @dataclass

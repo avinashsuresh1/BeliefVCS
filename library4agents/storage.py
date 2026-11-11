@@ -1,11 +1,12 @@
 import json
+import hashlib
 import os
 import re
 import shutil
 import time
 import yaml
 from typing import List, Optional, Protocol, Dict, Any
-from .models import Expertise, BeliefCommit, Evidence, CompilationResult
+from .models import Expertise, BeliefCommit, Evidence, CompilationResult, ProofVerification
 
 class StorageBackend(Protocol):
     def save(self, expertise: Expertise) -> None:
@@ -15,7 +16,7 @@ class StorageBackend(Protocol):
         ...
 
 class UnverifiedHypothesisError(Exception):
-    """Raised when attempting to merge an unverified or failing hypothesis branch into main."""
+    """Raised when a hypothesis branch cannot be safely integrated."""
     pass
 
 class BranchNotFoundError(Exception):
@@ -58,10 +59,7 @@ class MarkdownStorage:
         for filename in os.listdir(self.directory_path):
             if filename.endswith(".md"):
                 file_path = os.path.join(self.directory_path, filename)
-                try:
-                    results.append(self._load_file(file_path))
-                except Exception as e:
-                    print(f"Error loading {file_path}: {e}")
+                results.append(self._load_file(file_path))
         return results
 
     def _load_file(self, file_path: str) -> Expertise:
@@ -98,6 +96,7 @@ class VCSMarkdownStorage(MarkdownStorage):
         self.commits_dir = os.path.join(self.vcs_dir, "commits")
         self.evidence_dir = os.path.join(self.vcs_dir, "evidence")
         self.compilations_dir = os.path.join(self.vcs_dir, "compilations")
+        self.bases_dir = os.path.join(self.vcs_dir, "bases")
         self.head_file = os.path.join(self.vcs_dir, "HEAD")
         self._init_vcs()
 
@@ -106,6 +105,7 @@ class VCSMarkdownStorage(MarkdownStorage):
         os.makedirs(self.commits_dir, exist_ok=True)
         os.makedirs(self.evidence_dir, exist_ok=True)
         os.makedirs(self.compilations_dir, exist_ok=True)
+        os.makedirs(self.bases_dir, exist_ok=True)
         
         if not os.path.exists(self.head_file):
             with open(self.head_file, 'w', encoding='utf-8') as f:
@@ -186,9 +186,13 @@ class VCSMarkdownStorage(MarkdownStorage):
         self._sync_working_tree_to_branch(curr)
         # Copy curr branch files into new branch
         curr_dir = self._branch_dir(curr)
+        base_dir = os.path.join(self.bases_dir, self._sanitize_branch_name(branch_name))
+        os.makedirs(base_dir, exist_ok=True)
         for f in os.listdir(curr_dir):
             if f.endswith(".md"):
-                shutil.copy2(os.path.join(curr_dir, f), os.path.join(b_dir, f))
+                source_file = os.path.join(curr_dir, f)
+                shutil.copy2(source_file, os.path.join(b_dir, f))
+                shutil.copy2(source_file, os.path.join(base_dir, f))
 
     def checkout(self, branch_name: str) -> None:
         """Switch active working tree to branch_name."""
@@ -256,13 +260,35 @@ class VCSMarkdownStorage(MarkdownStorage):
             return CompilationResult(
                 passed=data["passed"],
                 evidence=Evidence.from_dict(data["evidence"]),
-                message=data["message"]
+                message=data["message"],
+                proof_verification=(
+                    ProofVerification.from_dict(data["proof_verification"])
+                    if data.get("proof_verification") else None
+                ),
+                revision_digest=data.get("revision_digest"),
             )
+
+    def snapshot_digest(self, branch: str) -> str:
+        """Return a stable digest of a branch's markdown knowledge snapshot."""
+        branch_dir = self._branch_dir(branch)
+        if self.current_branch == branch:
+            self._sync_working_tree_to_branch(branch)
+
+        digest = hashlib.sha256()
+        if os.path.isdir(branch_dir):
+            for filename in sorted(os.listdir(branch_dir)):
+                if filename.endswith(".md"):
+                    digest.update(filename.encode("utf-8"))
+                    digest.update(b"\0")
+                    with open(os.path.join(branch_dir, filename), "rb") as source:
+                        digest.update(source.read())
+                    digest.update(b"\0")
+        return digest.hexdigest()
 
     def merge(self, source_branch: str, target_branch: str = "main") -> BeliefCommit:
         """
-        Merge verified hypothesis branch into target branch (deploy to status quo).
-        Guard: Source branch MUST have a successful compilation!
+        Integrate a probed hypothesis branch without overwriting conflicting target changes.
+        The passing probe must match the source branch's current knowledge snapshot.
         """
         src_dir = self._branch_dir(source_branch)
         if not os.path.exists(src_dir):
@@ -275,16 +301,68 @@ class VCSMarkdownStorage(MarkdownStorage):
                 f"Cannot deploy unverified hypothesis branch '{source_branch}' to '{target_branch}'. "
                 f"Reason: {err}"
             )
+
+        if (
+            not compilation.revision_digest
+            or compilation.revision_digest != self.snapshot_digest(source_branch)
+        ):
+            raise UnverifiedHypothesisError(
+                f"Cannot deploy hypothesis branch '{source_branch}': its knowledge changed "
+                "after the last successful probe. Run the probe again."
+            )
             
         target_dir = self._branch_dir(target_branch)
         os.makedirs(target_dir, exist_ok=True)
+        if self.current_branch == target_branch:
+            self._sync_working_tree_to_branch(target_branch)
         
-        # Copy all markdown files from source branch to target branch
-        for f in os.listdir(src_dir):
-            if f.endswith(".md"):
-                shutil.copy2(os.path.join(src_dir, f), os.path.join(target_dir, f))
+        base_dir = os.path.join(self.bases_dir, self._sanitize_branch_name(source_branch))
+        if not os.path.isdir(base_dir):
+            raise UnverifiedHypothesisError(
+                f"Cannot deploy branch '{source_branch}': its merge base is unavailable. "
+                "Create a fresh hypothesis branch from the current status quo."
+            )
+
+        def read_snapshot(directory: str) -> Dict[str, bytes]:
+            snapshot = {}
+            for filename in os.listdir(directory):
+                if filename.endswith(".md"):
+                    with open(os.path.join(directory, filename), "rb") as source:
+                        snapshot[filename] = source.read()
+            return snapshot
+
+        base = read_snapshot(base_dir)
+        source = read_snapshot(src_dir)
+        target = read_snapshot(target_dir)
+        changes = []
+        conflicts = []
+        for filename in sorted(set(base) | set(source) | set(target)):
+            base_content = base.get(filename)
+            source_content = source.get(filename)
+            target_content = target.get(filename)
+            if source_content == base_content or source_content == target_content:
+                continue
+            if target_content == base_content:
+                changes.append((filename, source_content))
+            else:
+                conflicts.append(filename)
+
+        if conflicts:
+            raise UnverifiedHypothesisError(
+                "Cannot deploy because both branches changed the same knowledge records: "
+                + ", ".join(conflicts)
+            )
+
+        for filename, content in changes:
+            target_path = os.path.join(target_dir, filename)
+            if content is None:
+                if os.path.exists(target_path):
+                    os.remove(target_path)
+            else:
+                with open(target_path, "wb") as target_file:
+                    target_file.write(content)
                 
-        # If currently on target branch, sync to working tree
+        # If currently on target branch, sync the integrated knowledge to the working tree.
         if self.current_branch == target_branch:
             self._sync_branch_to_working_tree(target_branch)
             

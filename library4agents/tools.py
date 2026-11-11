@@ -125,14 +125,14 @@ def checkout_knowledge_branch(branch_name: str) -> str:
 
 def test_hypothesis(test_command: str) -> dict:
     """
-    Belief Testing ("Code Compiling"):
-    Executes a deterministic test/probe command to empirically verify the active branch's beliefs.
+    Run a bounded probe and record its result against the active knowledge snapshot.
+    A successful command is not, by itself, evidence that a specific proposition is true.
     
     Args:
         test_command: Shell command that runs the verification test (e.g. 'pytest tests/test_probe.py').
         
     Returns:
-        Dictionary with compilation status, exit code, and test log output.
+        Dictionary with probe status, exit code, snapshot digest, and test log output.
     """
     library = _get_library()
     res = library.compile(test_command)
@@ -142,19 +142,19 @@ def test_hypothesis_with_proof(
     test_command: str,
     claim: str,
     premises: Optional[List[str]] = None,
-    rationale: Optional[str] = None
+    rationale: Optional[str] = None,
+    analysis: Optional[Dict[str, Any]] = None,
 ) -> dict:
     """
-    Belief Testing with Natural Language Proof Theory:
-    1. Evaluates logical consistency: Checks that the proposition does NOT contradict
-       established dead ends, known hazards, or axioms on main.
-    2. Executes empirical verification test if logical consistency holds.
+    Record a probe and an optional cited natural-language argument assessment.
+    The assessment is advisory; it does not prove or promote the proposition.
     
     Args:
         test_command: Shell command for empirical verification.
         claim: The assertion/conclusion being hypothesized.
         premises: Established truths or assumptions this claim builds on.
-        rationale: The deductive argument connecting premises to claim.
+        rationale: The proposed reasoning connecting premises to claim.
+        analysis: Optional structured model analysis with cited knowledge IDs.
         
     Returns:
         Dictionary with compilation status, proof verification, and evidence.
@@ -166,13 +166,13 @@ def test_hypothesis_with_proof(
         rationale=rationale,
         status="CONJECTURE"
     )
-    res = library.compile(test_command, conjecture=conjecture)
+    res = library.compile(test_command, conjecture=conjecture, analysis=analysis)
     return res.to_dict()
 
 def deploy_knowledge_to_main(hypothesis_branch: str) -> str:
     """
-    Deploy verified knowledge into the main branch (updating the status quo).
-    GUARD: Will fail if the hypothesis branch has not been compiled with a passing test!
+    Integrate branch knowledge into main without changing proposition statuses.
+    GUARD: Requires a passing probe for the exact current knowledge snapshot.
     
     Args:
         hypothesis_branch: The hypothesis branch to merge into main.
@@ -198,6 +198,10 @@ def get_knowledge_vcs_status() -> dict:
         "branches": library.list_branches(),
         "total_territories": len(library.find())
     }
+
+def get_main_expertise() -> List[dict]:
+    """Return canonical territory records from main for explicit argument review."""
+    return [expertise.to_dict() for expertise in _get_library().get_main_expertise()]
 
 def ingest_knowledge(raw_text: str, commit_message: Optional[str] = None) -> str:
     """

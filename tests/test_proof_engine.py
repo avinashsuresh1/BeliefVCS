@@ -17,8 +17,7 @@ def temp_proof_library():
     yield lib
     shutil.rmtree(temp_dir)
 
-def test_proof_engine_catches_dead_end_contradiction():
-    # Knowledge base has a dead end
+def test_keyword_overlap_is_only_a_candidate_conflict():
     existing_exp = [
         Expertise(
             territory="HTML Extraction",
@@ -26,8 +25,6 @@ def test_proof_engine_catches_dead_end_contradiction():
             dead_ends=[Observation("Tried parsing HTML with Regex", "HTML is not a regular language")]
         )
     ]
-    
-    # Naive conjecture retrying regex
     conjecture = Proposition(
         claim="Use Regex for parsing HTML tags",
         premises=["Need fast text processing"],
@@ -35,11 +32,12 @@ def test_proof_engine_catches_dead_end_contradiction():
     )
 
     verif = ProofEngine.check_consistency(conjecture, axioms=[], existing_expertise=existing_exp)
-    assert verif.sound is False
-    assert len(verif.violations) == 1
-    assert "Contradicts established Dead End" in verif.violations[0]
+    assert verif.verdict == "UNRESOLVED"
+    assert verif.sound is None
+    assert existing_exp[0].dead_ends[0].id in verif.candidate_conflicts
 
-def test_proof_engine_accepts_rebuttal():
+
+def test_assessment_requires_existing_evidence_references():
     existing_exp = [
         Expertise(
             territory="HTML Extraction",
@@ -55,11 +53,47 @@ def test_proof_engine_accepts_rebuttal():
         rationale="Unlike standard regex, we overcome malformed HTML by validating regex output against DOM tree"
     )
 
-    verif = ProofEngine.check_consistency(conjecture, axioms=[], existing_expertise=existing_exp)
-    assert verif.sound is True
-    assert "Proof SOUND" in verif.explanation
+    verif = ProofEngine.check_consistency(
+        conjecture,
+        axioms=[],
+        existing_expertise=existing_exp,
+        analysis={
+            "assessment": "SUPPORTS",
+            "reasoning": "The cited source supports the narrower claim.",
+            "supporting_ids": ["invented-source-id"],
+            "counterevidence_ids": [],
+            "assumptions": [],
+            "testable_predictions": ["Compare output against a DOM parser."],
+        },
+    )
+    assert verif.verdict == "UNRESOLVED"
+    assert verif.sound is None
+    assert any("unknown evidence IDs" in violation for violation in verif.violations)
 
-def test_compile_with_proof_failure_aborts_execution(temp_proof_library):
+
+def test_valid_model_assessment_is_cited_but_not_soundness_proof():
+    evidence = Observation("Regex can handle a limited, known HTML subset.")
+    existing_exp = [Expertise(territory="HTML", guide="", treasures=[evidence])]
+    conjecture = Proposition(claim="Regex handles a limited HTML subset.")
+
+    verif = ProofEngine.check_consistency(
+        conjecture,
+        axioms=[],
+        existing_expertise=existing_exp,
+        analysis={
+            "assessment": "SUPPORTS",
+            "reasoning": "The observation supports a restricted version of the claim.",
+            "supporting_ids": [evidence.id],
+            "counterevidence_ids": [],
+            "assumptions": ["The input is within the stated subset."],
+            "testable_predictions": ["Test representative inputs from that subset."],
+        },
+    )
+    assert verif.verdict == "SUPPORTS"
+    assert verif.supporting_ids == [evidence.id]
+    assert verif.sound is None
+
+def test_unresolved_natural_language_assessment_does_not_claim_a_proof(temp_proof_library):
     # Establish dead end on main
     temp_proof_library.contribute(
         Expertise(
@@ -73,35 +107,29 @@ def test_compile_with_proof_failure_aborts_execution(temp_proof_library):
     temp_proof_library.branch("hypothesis/regex-attempt")
     temp_proof_library.checkout("hypothesis/regex-attempt")
 
-    # Contradictory proposition
     conjecture = Proposition(
         claim="Parsing HTML with Regex directly",
         rationale="It is fast"
     )
 
-    # Test command that would otherwise pass if run
     res = temp_proof_library.compile(f'"{sys.executable}" -c "exit(0)"', conjecture=conjecture)
-    
-    # Must fail because proof check failed!
-    assert res.passed is False
+    assert res.passed is True
     assert res.proof_verification is not None
-    assert res.proof_verification.sound is False
-    assert "Proof Inconsistency" in res.message
-    assert res.evidence.exit_code == -1
+    assert res.proof_verification.verdict == "UNRESOLVED"
+    assert res.proof_verification.sound is None
+    assert "not a proof" in res.message
 
-def test_compile_with_proof_success_and_merge_to_axioms(temp_proof_library):
-    # 1. Start hypothesis branch
+
+def test_merge_preserves_conjecture_status(temp_proof_library):
     temp_proof_library.branch("hypothesis/playwright-stealth")
     temp_proof_library.checkout("hypothesis/playwright-stealth")
 
-    # 2. Sound proposition
     conjecture = Proposition(
         claim="Playwright with stealth masks webdriver automation flags",
         premises=["Cloudflare checks navigator.webdriver"],
         rationale="Stealth plugin deletes the webdriver property before page scripts run"
     )
 
-    # Add to expertise on branch
     temp_proof_library.contribute(
         Expertise(
             territory="Bot Evasion",
@@ -110,18 +138,33 @@ def test_compile_with_proof_success_and_merge_to_axioms(temp_proof_library):
         )
     )
 
-    # 3. Compile: proof check succeeds and empirical test passes
     res = temp_proof_library.compile(f'"{sys.executable}" -c "exit(0)"', conjecture=conjecture)
     assert res.passed is True
-    assert res.proof_verification.sound is True
-    assert conjecture.status == "VERIFIED"
+    assert res.proof_verification.verdict == "UNRESOLVED"
+    assert conjecture.status == "CONJECTURE"
 
-    # 4. Deploy to main
     temp_proof_library.checkout("main")
     temp_proof_library.merge("hypothesis/playwright-stealth")
 
-    # 5. Verify proposition is now an established PROVEN Axiom on main!
     axioms = temp_proof_library.get_axioms()
-    assert len(axioms) == 1
-    assert axioms[0].status == "PROVEN"
-    assert axioms[0].claim == "Playwright with stealth masks webdriver automation flags"
+    assert axioms == []
+    merged = temp_proof_library.find(query="Bot Evasion")
+    assert merged[0].propositions[0].status == "CONJECTURE"
+
+
+def test_legacy_proven_and_agent_contribution_are_not_axioms(temp_proof_library):
+    proposition = Proposition(claim="A claim", status="PROVEN")
+    expertise = Expertise(territory="Review", guide="", propositions=[proposition])
+    temp_proof_library.contribute(expertise)
+
+    assert proposition.status == "CONJECTURE"
+    assert temp_proof_library.get_axioms() == []
+
+    accepted = temp_proof_library.accept_proposition(expertise.id, proposition.id)
+    assert accepted.status == "ACCEPTED"
+    assert [axiom.id for axiom in temp_proof_library.get_axioms()] == [proposition.id]
+
+
+def test_legacy_proven_status_loads_as_unreviewed():
+    proposition = Proposition.from_dict({"claim": "Old claim", "status": "PROVEN"})
+    assert proposition.status == "LEGACY_PROVEN"
